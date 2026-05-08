@@ -8,7 +8,7 @@ from folium.plugins import Draw
 from streamlit_folium import st_folium
 
 from athena import count_uprns_in_polygon
-from geo import polygon_area_m2
+from area_analysis import PolygonAnalysis
 
 POLYGONS_FILE = "polygons.geojson"
 THATCHAM = (51.4035, -1.2614)
@@ -57,8 +57,8 @@ with st.sidebar:
     if st.session_state.pending:
         st.subheader("New polygon")
         coords = st.session_state.pending["geometry"]["coordinates"]
-        area = polygon_area_m2(coords)
-        st.caption(f"Area: {area:,.0f} m²")
+        analysis = PolygonAnalysis(coords)
+        st.caption(f"Area: {analysis.area_m2:,.0f} m²")
 
         name = st.text_input("Name", value="New Area", key="pending_name")
         color = st.color_picker("Colour", value=DEFAULT_COLOR, key="pending_color")
@@ -72,7 +72,7 @@ with st.sidebar:
                         "id": str(uuid.uuid4()),
                         "name": name,
                         "color": color,
-                        "area_m2": area,
+                        "area_m2": analysis.area_m2,
                         "uprn_count": None,
                     },
                     "geometry": st.session_state.pending["geometry"],
@@ -108,13 +108,15 @@ with st.sidebar:
                     f'vertical-align:middle"></div> <b>{name}</b>',
                     unsafe_allow_html=True,
                 )
+                analysis = PolygonAnalysis(feat["geometry"]["coordinates"], uprn_count=count)
                 if area is not None:
                     st.caption(f"Area: {area:,.0f} m²")
                 if count is not None:
                     col_a, col_b = st.columns(2)
                     col_a.metric("Addresses", f"{count:,}")
-                    if count > 0 and area:
-                        col_b.metric("m² per address", f"{area / count:,.0f}")
+                    density = analysis.density_m2_per_address
+                    if density is not None:
+                        col_b.metric("m² per address", f"{density:,.0f}")
                 else:
                     st.caption("Address count not yet queried.")
 
@@ -130,10 +132,10 @@ with st.sidebar:
                         st.rerun()
                 with col_count:
                     if st.button("Count", key=f"count_{i}", use_container_width=True):
-                        coords = feat["geometry"]["coordinates"]
+                        pa = PolygonAnalysis(feat["geometry"]["coordinates"])
                         with st.spinner("Querying Athena…"):
-                            n = count_uprns_in_polygon(coords)
-                        st.session_state.polygons[i]["properties"]["uprn_count"] = n
+                            pa.fetch_count(count_uprns_in_polygon)
+                        st.session_state.polygons[i]["properties"]["uprn_count"] = pa.uprn_count
                         save_polygons(st.session_state.polygons)
                         st.rerun()
                 with col_delete:
