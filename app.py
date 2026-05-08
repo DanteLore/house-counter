@@ -16,6 +16,20 @@ DEFAULT_COLOR = "#3388ff"
 
 st.set_page_config(page_title="House Counter", layout="wide")
 
+st.markdown("""
+<style>
+section[data-testid="stSidebar"] button[data-testid="baseButton-secondary"] p,
+section[data-testid="stSidebar"] button[data-testid="baseButton-secondary"] ol,
+section[data-testid="stSidebar"] button[data-testid="baseButton-secondary"] ul,
+section[data-testid="stSidebar"] button[data-testid="baseButton-secondary"] dl {
+    font-size: 0.65rem !important;
+    white-space: nowrap !important;
+    margin: 0 !important;
+    line-height: 1 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 # ---------------------------------------------------------------------------
 # Persistence helpers
@@ -100,47 +114,63 @@ with st.sidebar:
             area = props.get("area_m2")
             count = props.get("uprn_count")
 
-            with st.expander(f"{'⬛' } {name}", expanded=False):
-                # colour swatch via markdown
-                st.markdown(
-                    f'<div style="display:inline-block;width:16px;height:16px;'
-                    f'background:{color};border-radius:3px;margin-right:6px;'
-                    f'vertical-align:middle"></div> <b>{name}</b>',
-                    unsafe_allow_html=True,
-                )
-                analysis = PolygonAnalysis(feat["geometry"]["coordinates"], uprn_count=count)
-                if area is not None:
-                    st.caption(f"Area: {area:,.0f} m²")
-                if count is not None:
-                    col_a, col_b = st.columns(2)
-                    col_a.metric("Addresses", f"{count:,}")
-                    density = analysis.density_m2_per_address
-                    if density is not None:
-                        col_b.metric("m² per address", f"{density:,.0f}")
-                else:
-                    st.caption("Address count not yet queried.")
+            expander_index = i + 1
+            st.markdown(
+                f"""<style>
+                section[data-testid="stSidebar"]
+                details:nth-of-type({expander_index}) summary span p::before {{
+                    content: "⬛";
+                    color: {color};
+                    margin-right: 4px;
+                    font-size: 0.7em;
+                    vertical-align: middle;
+                }}
+                </style>""",
+                unsafe_allow_html=True,
+            )
+            col_exp, col_x = st.columns([0.85, 0.15])
+            with col_x:
+                if st.button("✕", key=f"delete_{i}", help=f"Delete {name}"):
+                    st.session_state.polygons.pop(i)
+                    save_polygons(st.session_state.polygons)
+                    st.rerun()
+            with col_exp:
+                with st.expander(name, expanded=False):
+                    st.markdown(
+                        f'<span style="display:inline-block;width:12px;height:12px;'
+                        f'background:{color};border-radius:2px;margin-right:6px;'
+                        f'vertical-align:middle"></span><b>{name}</b>',
+                        unsafe_allow_html=True,
+                    )
+                    analysis = PolygonAnalysis(feat["geometry"]["coordinates"], uprn_count=count)
+                    if area is not None:
+                        st.caption(f"Area: {area:,.0f} m²")
+                    if count is not None:
+                        col_a, col_b = st.columns(2)
+                        col_a.metric("Addresses", f"{count:,}")
+                        density = analysis.density_m2_per_address
+                        if density is not None:
+                            col_b.metric("m² per address", f"{density:,.0f}")
+                    else:
+                        st.caption("Address count not yet queried.")
 
-                new_name = st.text_input("Rename", value=name, key=f"name_{i}")
-                new_color = st.color_picker("Colour", value=color, key=f"color_{i}")
+                    def make_save_callback(idx, name_key, color_key):
+                        def callback():
+                            st.session_state.polygons[idx]["properties"]["name"] = st.session_state[name_key]
+                            st.session_state.polygons[idx]["properties"]["color"] = st.session_state[color_key]
+                            save_polygons(st.session_state.polygons)
+                        return callback
 
-                col_update, col_count, col_delete = st.columns(3)
-                with col_update:
-                    if st.button("Update", key=f"update_{i}", use_container_width=True):
-                        st.session_state.polygons[i]["properties"]["name"] = new_name
-                        st.session_state.polygons[i]["properties"]["color"] = new_color
-                        save_polygons(st.session_state.polygons)
-                        st.rerun()
-                with col_count:
-                    if st.button("Count", key=f"count_{i}", use_container_width=True):
+                    st.text_input("Name", value=name, key=f"name_{i}",
+                                  on_change=make_save_callback(i, f"name_{i}", f"color_{i}"))
+                    st.color_picker("Colour", value=color, key=f"color_{i}",
+                                    on_change=make_save_callback(i, f"name_{i}", f"color_{i}"))
+
+                    if st.button("🔢 Count addresses", key=f"count_{i}", use_container_width=True):
                         pa = PolygonAnalysis(feat["geometry"]["coordinates"])
                         with st.spinner("Querying Athena…"):
                             pa.fetch_count(count_uprns_in_polygon)
                         st.session_state.polygons[i]["properties"]["uprn_count"] = pa.uprn_count
-                        save_polygons(st.session_state.polygons)
-                        st.rerun()
-                with col_delete:
-                    if st.button("Delete", key=f"delete_{i}", use_container_width=True):
-                        st.session_state.polygons.pop(i)
                         save_polygons(st.session_state.polygons)
                         st.rerun()
 
