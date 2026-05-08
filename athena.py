@@ -1,6 +1,7 @@
 import time
 import boto3
-from geo import bbox_partition_tiles, polygon_wkt_ring, bbox_wgs84
+from shapely.geometry import Polygon, Point
+from geo import bbox_partition_tiles, bbox_wgs84
 
 AWS_PROFILE = "dantelore"
 AWS_REGION = "eu-west-1"
@@ -14,7 +15,36 @@ def _client():
     return session.client("athena", region_name=AWS_REGION)
 
 
-def _run_query(sql):
+
+def _fetch_all_rows(client, execution_id):
+    rows = []
+    kwargs = {"QueryExecutionId": execution_id}
+    while True:
+        resp = client.get_query_results(**kwargs)
+        rows.extend(resp["ResultSet"]["Rows"])
+        token = resp.get("NextToken")
+        if not token:
+            break
+        kwargs["NextToken"] = token
+    return rows
+
+
+def count_uprns_in_polygon(geojson_coords):
+    """Fetch candidate UPRNs from Athena (bbox + partition filter) then test exact containment in Python."""
+    tiles = bbox_partition_tiles(geojson_coords)
+    grid_e_vals = ", ".join(str(e) for e, _ in tiles)
+    grid_n_vals = ", ".join(str(n) for _, n in tiles)
+    min_lat, max_lat, min_lon, max_lon = bbox_wgs84(geojson_coords)
+
+    sql = f"""
+SELECT DISTINCT uprn, latitude, longitude
+FROM {ATHENA_DB}.{ATHENA_TABLE}
+WHERE grid_e IN ({grid_e_vals})
+  AND grid_n IN ({grid_n_vals})
+  AND latitude  BETWEEN {min_lat} AND {max_lat}
+  AND longitude BETWEEN {min_lon} AND {max_lon}
+""".strip()
+
     client = _client()
     response = client.start_query_execution(
         QueryString=sql,
@@ -33,34 +63,18 @@ def _run_query(sql):
             raise RuntimeError(f"Athena query {state}: {reason}")
         time.sleep(1)
 
-    results = client.get_query_results(QueryExecutionId=execution_id)
-    return results
+    rows = _fetch_all_rows(client, execution_id)
 
-
-def count_uprns_in_polygon(geojson_coords):
-    """Query Athena for the number of distinct UPRNs within a GeoJSON polygon."""
-    tiles = bbox_partition_tiles(geojson_coords)
-    grid_e_vals = ", ".join(str(e) for e, _ in tiles)
-    grid_n_vals = ", ".join(str(n) for _, n in tiles)
-    min_lat, max_lat, min_lon, max_lon = bbox_wgs84(geojson_coords)
-    wkt_ring = polygon_wkt_ring(geojson_coords)
-
-    sql = f"""
-SELECT COUNT(DISTINCT uprn) AS cnt
-FROM {ATHENA_DB}.{ATHENA_TABLE}
-WHERE grid_e IN ({grid_e_vals})
-  AND grid_n IN ({grid_n_vals})
-  AND latitude  BETWEEN {min_lat} AND {max_lat}
-  AND longitude BETWEEN {min_lon} AND {max_lon}
-  AND ST_Contains(
-        ST_GeomFromText('POLYGON(({wkt_ring}))'),
-        ST_Point(longitude, latitude)
-      )
-""".strip()
-
-    results = _run_query(sql)
-    rows = results["ResultSet"]["Rows"]
-    # rows[0] is header, rows[1] is data
-    if len(rows) < 2:
-        return 0
-    return int(rows[1]["Data"][0].get("VarCharValue", "0"))
+    # rows[0] is the header row
+    poly = Polygon(geojson_coords[0])
+    count = 0
+    for row in rows[1:]:
+        vals = row["Data"]
+        try:
+            lat = float(vals[1]["VarCharValue"])
+            lon = float(vals[2]["VarCharValue"])
+        except (KeyError, ValueError):
+            continue
+        if poly.contains(Point(lon, lat)):
+            count += 1
+    return count
