@@ -111,7 +111,10 @@ with st.sidebar:
                 if area is not None:
                     st.caption(f"Area: {area:,.0f} m²")
                 if count is not None:
-                    st.metric("Addresses", f"{count:,}")
+                    col_a, col_b = st.columns(2)
+                    col_a.metric("Addresses", f"{count:,}")
+                    if count > 0 and area:
+                        col_b.metric("m² per address", f"{area / count:,.0f}")
                 else:
                     st.caption("Address count not yet queried.")
 
