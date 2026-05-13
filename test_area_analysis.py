@@ -1,5 +1,15 @@
 import pytest
+from pyproj import Transformer
 from area_analysis import PolygonAnalysis
+
+_osgb_to_wgs84 = Transformer.from_crs("EPSG:27700", "EPSG:4326", always_xy=True)
+
+
+def _osgb_ring(*osgb_corners):
+    """Convert a sequence of (easting, northing) pairs to a closed GeoJSON ring [[lon, lat], ...]."""
+    ring = [list(_osgb_to_wgs84.transform(e, n)) for e, n in osgb_corners]
+    ring.append(ring[0])
+    return [ring]
 
 # A small rectangle near Thatcham, Berkshire (~1km x ~1km).
 # Corners in WGS84 [lon, lat], closed ring (first == last).
@@ -22,6 +32,64 @@ TINY_RECT = [[
     [-0.1276, 51.5075],
     [-0.1276, 51.5074],
 ]]
+
+
+class TestAreaPrecision:
+    """Exact-area tests using polygons defined in OSGB36 coordinates, where the true
+    area is known to the metre.  We round-trip via the same transformer the app uses,
+    so the tolerance reflects only floating-point noise, not projection error."""
+
+    def test_1km_square_central_london(self):
+        # 1000m × 1000m square = exactly 1,000,000 m²
+        coords = _osgb_ring(
+            (530000, 180000), (531000, 180000),
+            (531000, 181000), (530000, 181000),
+        )
+        area = PolygonAnalysis(coords).area_m2
+        assert area == pytest.approx(1_000_000, rel=1e-3), f"Got {area:.2f} m²"
+
+    def test_1km_square_thatcham(self):
+        # Same shape at a different latitude — confirms the projection handles
+        # different parts of GB consistently.
+        coords = _osgb_ring(
+            (446000, 164000), (447000, 164000),
+            (447000, 165000), (446000, 165000),
+        )
+        area = PolygonAnalysis(coords).area_m2
+        assert area == pytest.approx(1_000_000, rel=1e-3), f"Got {area:.2f} m²"
+
+    def test_right_triangle_known_area(self):
+        # Right-angle triangle with legs 1000m and 2000m → area = ½ × 1000 × 2000 = 1,000,000 m²
+        coords = _osgb_ring(
+            (530000, 180000), (531000, 180000), (530000, 182000),
+        )
+        area = PolygonAnalysis(coords).area_m2
+        assert area == pytest.approx(1_000_000, rel=1e-3), f"Got {area:.2f} m²"
+
+    def test_2km_square_is_four_times_1km_square(self):
+        # Scaling both sides by 2 should quadruple the area exactly.
+        coords_1km = _osgb_ring(
+            (530000, 180000), (531000, 180000),
+            (531000, 181000), (530000, 181000),
+        )
+        coords_2km = _osgb_ring(
+            (530000, 180000), (532000, 180000),
+            (532000, 182000), (530000, 182000),
+        )
+        area_1km = PolygonAnalysis(coords_1km).area_m2
+        area_2km = PolygonAnalysis(coords_2km).area_m2
+        assert area_2km == pytest.approx(4 * area_1km, rel=1e-3)
+
+    def test_winding_order_does_not_affect_area(self):
+        # Area should be the same regardless of whether the ring is CW or CCW.
+        cw = _osgb_ring(
+            (530000, 180000), (531000, 180000),
+            (531000, 181000), (530000, 181000),
+        )
+        ccw = [list(reversed(cw[0]))]
+        assert PolygonAnalysis(cw).area_m2 == pytest.approx(
+            PolygonAnalysis(ccw).area_m2, rel=1e-6
+        )
 
 
 class TestArea:
