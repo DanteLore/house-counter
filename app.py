@@ -218,14 +218,15 @@ if not st.session_state.polygons:
 else:
     with st.container(border=True):
         # Header row
-        h0, h1, h2, h3, h4, h5, h6 = st.columns([1, 3, 2, 2, 2, 2, 5])
+        h0, h1, h2, h3, h4, h5, h6, h7 = st.columns([1, 3, 2, 2, 2, 2, 2, 5])
         h0.markdown("**Colour**")
         h1.markdown("**Name**")
         h2.markdown("**Area (m²)**")
-        h3.markdown("**Addresses**")
-        h4.markdown("**m² / address**")
-        h5.markdown("**DPH**")
-        h6.markdown("**Actions**")
+        h3.markdown("**Area (ha)**")
+        h4.markdown("**Addresses**")
+        h5.markdown("**m² / address**")
+        h6.markdown("**DPH**")
+        h7.markdown("**Actions**")
 
         st.divider()
 
@@ -240,7 +241,7 @@ else:
             showing = poly_id in st.session_state.show_addresses
             analysis = PolygonAnalysis(feat["geometry"]["coordinates"], uprn_count=count)
 
-            c0, c1, c2, c3, c4, c5, c6 = st.columns([1, 3, 2, 2, 2, 2, 5])
+            c0, c1, c2, c3, c4, c5, c6, c7 = st.columns([1, 3, 2, 2, 2, 2, 2, 5])
 
             with c0:
                 new_color = st.color_picker("Colour", value=color, key=f"color_{i}", label_visibility="collapsed")
@@ -257,13 +258,14 @@ else:
                     st.rerun()
 
             c2.markdown(f"{area:,.0f}" if area is not None else "—")
-            c3.markdown(f"{count:,}" if count is not None else "—")
+            c3.markdown(f"{analysis.area_ha:,.2f}")
+            c4.markdown(f"{count:,}" if count is not None else "—")
             density = analysis.density_m2_per_address
-            c4.markdown(f"{density:,.0f}" if density is not None else "—")
+            c5.markdown(f"{density:,.0f}" if density is not None else "—")
             dph = analysis.dwellings_per_hectare
-            c5.markdown(f"{dph:.1f}" if dph is not None else "—")
+            c6.markdown(f"{dph:.1f}" if dph is not None else "—")
 
-            with c6:
+            with c7:
                 b1, b2, b3 = st.columns(3)
                 if b1.button("🔢 Count", key=f"count_{i}", use_container_width=True):
                     pa = PolygonAnalysis(feat["geometry"]["coordinates"])
