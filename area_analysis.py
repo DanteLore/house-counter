@@ -7,6 +7,7 @@ from geo import polygon_area_m2
 class PolygonAnalysis:
     geojson_coords: list
     uprn_count: Optional[int] = field(default=None)
+    uprn_points: Optional[list] = field(default=None)  # list of {lat, lon}
 
     @property
     def area_m2(self) -> float:
@@ -20,3 +21,7 @@ class PolygonAnalysis:
 
     def fetch_count(self, fetcher: Callable[[list], int]) -> None:
         self.uprn_count = fetcher(self.geojson_coords)
+
+    def fetch_points(self, fetcher: Callable[[list], list]) -> None:
+        self.uprn_points = fetcher(self.geojson_coords)
+        self.uprn_count = len(self.uprn_points)

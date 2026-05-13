@@ -4,10 +4,11 @@ import uuid
 
 import folium
 import streamlit as st
-from folium.plugins import Draw
+from folium import JsCode
+from folium.plugins import Draw, MarkerCluster
 from streamlit_folium import st_folium
 
-from athena import count_uprns_in_polygon
+from athena import count_uprns_in_polygon, fetch_uprns_in_polygon
 from area_analysis import PolygonAnalysis
 
 POLYGONS_FILE = "polygons.geojson"
@@ -18,14 +19,19 @@ st.set_page_config(page_title="House Counter", layout="wide")
 
 st.markdown("""
 <style>
-section[data-testid="stSidebar"] button[data-testid="baseButton-secondary"] p,
-section[data-testid="stSidebar"] button[data-testid="baseButton-secondary"] ol,
-section[data-testid="stSidebar"] button[data-testid="baseButton-secondary"] ul,
-section[data-testid="stSidebar"] button[data-testid="baseButton-secondary"] dl {
-    font-size: 0.65rem !important;
-    white-space: nowrap !important;
-    margin: 0 !important;
-    line-height: 1 !important;
+/* Hide the sidebar toggle and sidebar entirely */
+[data-testid="stSidebar"] { display: none; }
+[data-testid="collapsedControl"] { display: none; }
+/* Tighten up table row buttons */
+div[data-testid="column"] button { padding: 0.2rem 0.4rem; }
+/* Remove top padding so map sits high */
+.main .block-container { padding-top: 0.75rem; }
+/* Table border and margin */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    margin: 0.75rem 0;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -57,127 +63,41 @@ if "polygons" not in st.session_state:
     st.session_state.polygons = load_polygons()
 
 if "pending" not in st.session_state:
-    st.session_state.pending = None  # GeoJSON Feature dict
+    st.session_state.pending = None
+
+if "show_addresses" not in st.session_state:
+    st.session_state.show_addresses = set()
 
 
 # ---------------------------------------------------------------------------
-# Sidebar
+# Map helpers
 # ---------------------------------------------------------------------------
 
-with st.sidebar:
-    st.title("House Counter")
 
-    # --- Pending drawn polygon ---
-    if st.session_state.pending:
-        st.subheader("New polygon")
-        coords = st.session_state.pending["geometry"]["coordinates"]
-        analysis = PolygonAnalysis(coords)
-        st.caption(f"Area: {analysis.area_m2:,.0f} m²")
-
-        name = st.text_input("Name", value="New Area", key="pending_name")
-        color = st.color_picker("Colour", value=DEFAULT_COLOR, key="pending_color")
-
-        col_save, col_discard = st.columns(2)
-        with col_save:
-            if st.button("Save", use_container_width=True):
-                feature = {
-                    "type": "Feature",
-                    "properties": {
-                        "id": str(uuid.uuid4()),
-                        "name": name,
-                        "color": color,
-                        "area_m2": analysis.area_m2,
-                        "uprn_count": None,
-                    },
-                    "geometry": st.session_state.pending["geometry"],
-                }
-                st.session_state.polygons.append(feature)
-                save_polygons(st.session_state.polygons)
-                st.session_state.pending = None
-                st.rerun()
-        with col_discard:
-            if st.button("Discard", use_container_width=True):
-                st.session_state.pending = None
-                st.rerun()
-
-        st.divider()
-
-    # --- Saved polygons ---
-    st.subheader("Saved areas")
-    if not st.session_state.polygons:
-        st.caption("Draw a polygon on the map to get started.")
-    else:
-        for i, feat in enumerate(st.session_state.polygons):
-            props = feat["properties"]
-            color = props.get("color", DEFAULT_COLOR)
-            name = props.get("name", "Unnamed")
-            area = props.get("area_m2")
-            count = props.get("uprn_count")
-
-            expander_index = i + 1
-            st.markdown(
-                f"""<style>
-                section[data-testid="stSidebar"]
-                details:nth-of-type({expander_index}) summary span p::before {{
-                    content: "⬛";
-                    color: {color};
-                    margin-right: 4px;
-                    font-size: 0.7em;
-                    vertical-align: middle;
-                }}
-                </style>""",
-                unsafe_allow_html=True,
-            )
-            col_exp, col_x = st.columns([0.85, 0.15])
-            with col_x:
-                if st.button("✕", key=f"delete_{i}", help=f"Delete {name}"):
-                    st.session_state.polygons.pop(i)
-                    save_polygons(st.session_state.polygons)
-                    st.rerun()
-            with col_exp:
-                with st.expander(name, expanded=False):
-                    st.markdown(
-                        f'<span style="display:inline-block;width:12px;height:12px;'
-                        f'background:{color};border-radius:2px;margin-right:6px;'
-                        f'vertical-align:middle"></span><b>{name}</b>',
-                        unsafe_allow_html=True,
-                    )
-                    analysis = PolygonAnalysis(feat["geometry"]["coordinates"], uprn_count=count)
-                    if area is not None:
-                        st.caption(f"Area: {area:,.0f} m²")
-                    if count is not None:
-                        col_a, col_b = st.columns(2)
-                        col_a.metric("Addresses", f"{count:,}")
-                        density = analysis.density_m2_per_address
-                        if density is not None:
-                            col_b.metric("m² per address", f"{density:,.0f}")
-                    else:
-                        st.caption("Address count not yet queried.")
-
-                    def make_save_callback(idx, name_key, color_key):
-                        def callback():
-                            st.session_state.polygons[idx]["properties"]["name"] = st.session_state[name_key]
-                            st.session_state.polygons[idx]["properties"]["color"] = st.session_state[color_key]
-                            save_polygons(st.session_state.polygons)
-                        return callback
-
-                    st.text_input("Name", value=name, key=f"name_{i}",
-                                  on_change=make_save_callback(i, f"name_{i}", f"color_{i}"))
-                    st.color_picker("Colour", value=color, key=f"color_{i}",
-                                    on_change=make_save_callback(i, f"name_{i}", f"color_{i}"))
-
-                    if st.button("🔢 Count addresses", key=f"count_{i}", use_container_width=True):
-                        pa = PolygonAnalysis(feat["geometry"]["coordinates"])
-                        with st.spinner("Querying Athena…"):
-                            pa.fetch_count(count_uprns_in_polygon)
-                        st.session_state.polygons[i]["properties"]["uprn_count"] = pa.uprn_count
-                        save_polygons(st.session_state.polygons)
-                        st.rerun()
+def _cluster_icon_js(color: str) -> JsCode:
+    return JsCode(f"""
+function(cluster) {{
+    var count = cluster.getChildCount();
+    var size = count < 10 ? 30 : count < 100 ? 38 : 46;
+    return new L.DivIcon({{
+        html: '<div style="background:{color};opacity:0.85;border-radius:50%;'
+            + 'width:' + size + 'px;height:' + size + 'px;'
+            + 'display:flex;align-items:center;justify-content:center;'
+            + 'color:#fff;font-weight:bold;font-size:12px;border:2px solid #fff;">'
+            + count + '</div>',
+        className: '',
+        iconSize: [size, size],
+        iconAnchor: [size/2, size/2]
+    }});
+}}
+""")
 
 
 # ---------------------------------------------------------------------------
 # Map
 # ---------------------------------------------------------------------------
+
+st.title("House Counter")
 
 m = folium.Map(location=THATCHAM, zoom_start=13, tiles="OpenStreetMap")
 
@@ -195,21 +115,54 @@ Draw(
 ).add_to(m)
 
 for feat in st.session_state.polygons:
-    color = feat["properties"].get("color", DEFAULT_COLOR)
+    props_display = feat["properties"]
+    color_display = props_display.get("color", DEFAULT_COLOR)
     folium.GeoJson(
         feat,
-        style_function=lambda _, c=color: {
+        style_function=lambda _, c=color_display: {
             "color": c,
             "fillColor": c,
             "fillOpacity": 0.2,
             "weight": 2,
         },
-        tooltip=feat["properties"].get("name", ""),
+        tooltip=folium.Tooltip(props_display.get("name", "")),
     ).add_to(m)
 
-output = st_folium(m, use_container_width=True, height=750, returned_objects=["last_active_drawing"])
+for feat in st.session_state.polygons:
+    props = feat["properties"]
+    poly_id = props.get("id", "")
+    color = props.get("color", DEFAULT_COLOR)
 
+    if poly_id in st.session_state.show_addresses:
+        points = props.get("uprn_points") or []
+        cluster = MarkerCluster(
+            options={
+                "maxClusterRadius": 20,
+                "disableClusteringAtZoom": 17,
+                "iconCreateFunction": _cluster_icon_js(color),
+            }
+        ).add_to(m)
+        for pt in points:
+            folium.CircleMarker(
+                location=[pt["lat"], pt["lon"]],
+                radius=4,
+                color=color,
+                fill=True,
+                fill_color=color,
+                fill_opacity=0.8,
+                weight=0,
+            ).add_to(cluster)
+
+output = st_folium(
+    m,
+    use_container_width=True,
+    height=600,
+    returned_objects=["last_active_drawing"],
+)
+
+# ---------------------------------------------------------------------------
 # Capture newly drawn polygon
+# ---------------------------------------------------------------------------
 drawn = output.get("last_active_drawing")
 if drawn and drawn.get("geometry", {}).get("type") in ("Polygon", "Rectangle"):
     existing_coords = (
@@ -218,5 +171,128 @@ if drawn and drawn.get("geometry", {}).get("type") in ("Polygon", "Rectangle"):
         else None
     )
     if drawn["geometry"]["coordinates"] != existing_coords:
-        st.session_state.pending = drawn
-        st.rerun()
+        saved_coords = [f["geometry"]["coordinates"] for f in st.session_state.polygons]
+        if drawn["geometry"]["coordinates"] not in saved_coords:
+            st.session_state.pending = drawn
+            st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Pending new polygon banner
+# ---------------------------------------------------------------------------
+if st.session_state.pending:
+    coords = st.session_state.pending["geometry"]["coordinates"]
+    analysis = PolygonAnalysis(coords)
+    with st.container(border=True):
+        st.caption(f"New polygon — area: {analysis.area_m2:,.0f} m²")
+        pc1, pc2, pc3, pc4 = st.columns([3, 2, 1, 1])
+        name_val = pc1.text_input("Name", value="New Area", key="pending_name", label_visibility="collapsed")
+        color_val = pc2.color_picker("Colour", value=DEFAULT_COLOR, key="pending_color", label_visibility="collapsed")
+        if pc3.button("Save", use_container_width=True):
+            feature = {
+                "type": "Feature",
+                "properties": {
+                    "id": str(uuid.uuid4()),
+                    "name": name_val,
+                    "color": color_val,
+                    "area_m2": analysis.area_m2,
+                    "uprn_count": None,
+                    "uprn_points": None,
+                },
+                "geometry": st.session_state.pending["geometry"],
+            }
+            st.session_state.polygons.append(feature)
+            save_polygons(st.session_state.polygons)
+            st.session_state.pending = None
+            st.rerun()
+        if pc4.button("Discard", use_container_width=True):
+            st.session_state.pending = None
+            st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Polygon table
+# ---------------------------------------------------------------------------
+if not st.session_state.polygons:
+    st.caption("Draw a polygon on the map to get started.")
+else:
+    with st.container(border=True):
+        # Header row
+        h0, h1, h2, h3, h4, h5 = st.columns([1, 3, 2, 2, 2, 5])
+        h0.markdown("**Colour**")
+        h1.markdown("**Name**")
+        h2.markdown("**Area (m²)**")
+        h3.markdown("**Addresses**")
+        h4.markdown("**m² / address**")
+        h5.markdown("**Actions**")
+
+        st.divider()
+
+        for i, feat in enumerate(st.session_state.polygons):
+            props = feat["properties"]
+            color = props.get("color", DEFAULT_COLOR)
+            name = props.get("name", "Unnamed")
+            area = props.get("area_m2")
+            count = props.get("uprn_count")
+            points = props.get("uprn_points")
+            poly_id = props.get("id", str(i))
+            showing = poly_id in st.session_state.show_addresses
+            analysis = PolygonAnalysis(feat["geometry"]["coordinates"], uprn_count=count)
+
+            c0, c1, c2, c3, c4, c5 = st.columns([1, 3, 2, 2, 2, 5])
+
+            with c0:
+                new_color = st.color_picker("Colour", value=color, key=f"color_{i}", label_visibility="collapsed")
+                if new_color != color:
+                    st.session_state.polygons[i]["properties"]["color"] = new_color
+                    save_polygons(st.session_state.polygons)
+                    st.rerun()
+
+            with c1:
+                new_name = st.text_input("Name", value=name, key=f"name_{i}", label_visibility="collapsed")
+                if new_name != name:
+                    st.session_state.polygons[i]["properties"]["name"] = new_name
+                    save_polygons(st.session_state.polygons)
+                    st.rerun()
+
+            c2.markdown(f"{area:,.0f}" if area is not None else "—")
+            c3.markdown(f"{count:,}" if count is not None else "—")
+            density = analysis.density_m2_per_address
+            c4.markdown(f"{density:,.0f}" if density is not None else "—")
+
+            with c5:
+                b1, b2, b3 = st.columns(3)
+                if b1.button("🔢 Count", key=f"count_{i}", use_container_width=True):
+                    pa = PolygonAnalysis(feat["geometry"]["coordinates"])
+                    with st.spinner("Querying Athena…"):
+                        pa.fetch_count(count_uprns_in_polygon)
+                    st.session_state.polygons[i]["properties"]["uprn_count"] = pa.uprn_count
+                    save_polygons(st.session_state.polygons)
+                    st.rerun()
+
+                if points is None:
+                    show_label = "📍 Show"
+                else:
+                    show_label = "📍 Hide" if showing else "📍 Show"
+                if b2.button(show_label, key=f"show_{i}", use_container_width=True):
+                    if points is None:
+                        pa = PolygonAnalysis(feat["geometry"]["coordinates"])
+                        with st.spinner("Fetching address locations…"):
+                            pa.fetch_points(fetch_uprns_in_polygon)
+                        st.session_state.polygons[i]["properties"]["uprn_points"] = pa.uprn_points
+                        st.session_state.polygons[i]["properties"]["uprn_count"] = pa.uprn_count
+                        st.session_state.show_addresses.add(poly_id)
+                        save_polygons(st.session_state.polygons)
+                    elif showing:
+                        st.session_state.show_addresses.discard(poly_id)
+                    else:
+                        st.session_state.show_addresses.add(poly_id)
+                    st.rerun()
+
+                if b3.button("✕ Delete", key=f"delete_{i}", use_container_width=True):
+                    st.session_state.polygons.pop(i)
+                    st.session_state.show_addresses.discard(poly_id)
+                    save_polygons(st.session_state.polygons)
+                    st.rerun()
+
+            st.divider()

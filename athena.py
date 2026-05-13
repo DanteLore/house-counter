@@ -29,8 +29,8 @@ def _fetch_all_rows(client, execution_id):
     return rows
 
 
-def count_uprns_in_polygon(geojson_coords):
-    """Fetch candidate UPRNs from Athena (bbox + partition filter) then test exact containment in Python."""
+def _query_uprns(geojson_coords):
+    """Run Athena bbox query and return rows within the exact polygon as (lat, lon) tuples."""
     tiles = bbox_partition_tiles(geojson_coords)
     grid_e_vals = ", ".join(str(e) for e, _ in tiles)
     grid_n_vals = ", ".join(str(n) for _, n in tiles)
@@ -65,9 +65,8 @@ WHERE grid_e IN ({grid_e_vals})
 
     rows = _fetch_all_rows(client, execution_id)
 
-    # rows[0] is the header row
     poly = Polygon(geojson_coords[0])
-    count = 0
+    points = []
     for row in rows[1:]:
         vals = row["Data"]
         try:
@@ -76,5 +75,14 @@ WHERE grid_e IN ({grid_e_vals})
         except (KeyError, ValueError):
             continue
         if poly.contains(Point(lon, lat)):
-            count += 1
-    return count
+            points.append((lat, lon))
+    return points
+
+
+def count_uprns_in_polygon(geojson_coords):
+    return len(_query_uprns(geojson_coords))
+
+
+def fetch_uprns_in_polygon(geojson_coords):
+    """Return list of {lat, lon} dicts for all addresses within the polygon."""
+    return [{"lat": lat, "lon": lon} for lat, lon in _query_uprns(geojson_coords)]
