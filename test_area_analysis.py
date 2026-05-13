@@ -112,24 +112,100 @@ class TestArea:
         assert small < big / 100
 
 
-class TestDensity:
-    def test_density_none_when_count_not_set(self):
+class TestAreaHectares:
+    def test_area_ha_is_area_m2_divided_by_10000(self):
         analysis = PolygonAnalysis(THATCHAM_RECT)
-        assert analysis.density_m2_per_address is None
+        assert analysis.area_ha == pytest.approx(analysis.area_m2 / 10_000)
 
-    def test_density_none_when_count_zero(self):
-        analysis = PolygonAnalysis(THATCHAM_RECT, uprn_count=0)
-        assert analysis.density_m2_per_address is None
+    def test_1km_square_is_100_hectares(self):
+        coords = _osgb_ring(
+            (530000, 180000), (531000, 180000),
+            (531000, 181000), (530000, 181000),
+        )
+        # Wait — this is 1000m × 1000m = 1,000,000 m² = 100 ha
+        assert PolygonAnalysis(coords).area_ha == pytest.approx(100.0, rel=1e-3)
 
-    def test_density_calculation(self):
+    def test_area_ha_positive(self):
+        assert PolygonAnalysis(THATCHAM_RECT).area_ha > 0
+
+
+class TestDensity:
+    # ---- m² per address ----
+
+    def test_m2_per_address_none_when_count_not_set(self):
+        assert PolygonAnalysis(THATCHAM_RECT).density_m2_per_address is None
+
+    def test_m2_per_address_none_when_count_zero(self):
+        assert PolygonAnalysis(THATCHAM_RECT, uprn_count=0).density_m2_per_address is None
+
+    def test_m2_per_address_calculation(self):
         analysis = PolygonAnalysis(THATCHAM_RECT, uprn_count=100)
-        expected = analysis.area_m2 / 100
-        assert analysis.density_m2_per_address == pytest.approx(expected)
+        assert analysis.density_m2_per_address == pytest.approx(analysis.area_m2 / 100)
 
-    def test_density_decreases_with_more_addresses(self):
+    def test_m2_per_address_decreases_with_more_addresses(self):
         sparse = PolygonAnalysis(THATCHAM_RECT, uprn_count=10)
         dense = PolygonAnalysis(THATCHAM_RECT, uprn_count=1000)
         assert sparse.density_m2_per_address > dense.density_m2_per_address
+
+    def test_m2_per_address_single_dwelling(self):
+        analysis = PolygonAnalysis(THATCHAM_RECT, uprn_count=1)
+        assert analysis.density_m2_per_address == pytest.approx(analysis.area_m2)
+
+    # ---- DPH ----
+
+    def test_dph_none_when_count_not_set(self):
+        assert PolygonAnalysis(THATCHAM_RECT).dwellings_per_hectare is None
+
+    def test_dph_none_when_count_zero(self):
+        assert PolygonAnalysis(THATCHAM_RECT, uprn_count=0).dwellings_per_hectare is None
+
+    def test_dph_calculation(self):
+        analysis = PolygonAnalysis(THATCHAM_RECT, uprn_count=100)
+        assert analysis.dwellings_per_hectare == pytest.approx(
+            100 / analysis.area_ha
+        )
+
+    def test_dph_increases_with_more_addresses(self):
+        sparse = PolygonAnalysis(THATCHAM_RECT, uprn_count=10)
+        dense = PolygonAnalysis(THATCHAM_RECT, uprn_count=1000)
+        assert sparse.dwellings_per_hectare < dense.dwellings_per_hectare
+
+    def test_dph_exact_1ha_100_dwellings(self):
+        # 100m × 100m OSGB36 square = exactly 10,000 m² = 1 ha
+        # 100 dwellings → exactly 100 DPH
+        coords = _osgb_ring(
+            (530000, 180000), (530100, 180000),
+            (530100, 180100), (530000, 180100),
+        )
+        analysis = PolygonAnalysis(coords, uprn_count=100)
+        assert analysis.dwellings_per_hectare == pytest.approx(100.0, rel=1e-3)
+
+    def test_dph_exact_1ha_30_dwellings(self):
+        # 1 ha, 30 dwellings → 30 DPH (typical suburban density)
+        coords = _osgb_ring(
+            (530000, 180000), (530100, 180000),
+            (530100, 180100), (530000, 180100),
+        )
+        analysis = PolygonAnalysis(coords, uprn_count=30)
+        assert analysis.dwellings_per_hectare == pytest.approx(30.0, rel=1e-3)
+
+    def test_dph_single_dwelling(self):
+        analysis = PolygonAnalysis(THATCHAM_RECT, uprn_count=1)
+        assert analysis.dwellings_per_hectare == pytest.approx(1 / analysis.area_ha)
+
+    # ---- DPH and m²/address are exact reciprocals (scaled by 10,000) ----
+
+    def test_dph_and_m2_per_address_are_reciprocals(self):
+        analysis = PolygonAnalysis(THATCHAM_RECT, uprn_count=250)
+        assert analysis.dwellings_per_hectare == pytest.approx(
+            10_000 / analysis.density_m2_per_address
+        )
+
+    def test_dph_times_m2_per_address_equals_10000(self):
+        for count in [1, 10, 100, 1000]:
+            analysis = PolygonAnalysis(THATCHAM_RECT, uprn_count=count)
+            product = analysis.dwellings_per_hectare * analysis.density_m2_per_address
+            assert product == pytest.approx(10_000.0), f"Failed for count={count}"
 
 
 class TestFetchCount:
