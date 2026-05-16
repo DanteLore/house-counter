@@ -20,6 +20,7 @@ Run the app and draw a polygon on the map to get started.
 
 - Python 3.x
 - AWS credentials configured for profile `dantelore` with access to Athena and S3 (`eu-west-1`)
+- Data loaded to the lake via [DanteLore/gov-etl](https://github.com/DanteLore/gov-etl) — see that repo for ETL scripts covering all datasets listed above
 
 ## Getting started
 
