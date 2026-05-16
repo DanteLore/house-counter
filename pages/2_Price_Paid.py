@@ -732,3 +732,5 @@ fig_turnover.update_layout(
 )
 fig_turnover.update_yaxes(tickformat=".1f", ticksuffix="%")
 st.plotly_chart(fig_turnover, width="stretch")
+
+nav.render_attributions()
