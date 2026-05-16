@@ -3,10 +3,21 @@ from pyproj import Transformer
 from shapely.geometry import Polygon, Point
 
 _wgs84_to_osgb = Transformer.from_crs("EPSG:4326", "EPSG:27700", always_xy=True)
+_osgb_to_wgs84 = Transformer.from_crs("EPSG:27700", "EPSG:4326", always_xy=True)
+
+
+def osgb_to_wgs84(easting, northing):
+    return _osgb_to_wgs84.transform(easting, northing)  # returns (lon, lat)
 
 
 def wgs84_to_osgb(lon, lat):
     return _wgs84_to_osgb.transform(lon, lat)
+
+
+def polygon_osgb(geojson_coords):
+    """Return a Shapely Polygon of the outer ring projected to OSGB36 (metres)."""
+    ring = geojson_coords[0]
+    return Polygon([wgs84_to_osgb(lon, lat) for lon, lat in ring])
 
 
 def polygon_area_m2(geojson_coords):

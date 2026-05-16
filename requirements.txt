@@ -4,3 +4,5 @@ folium
 shapely
 pyproj
 boto3
+plotly
+scipy

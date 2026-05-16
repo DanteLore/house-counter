@@ -10,6 +10,7 @@ from streamlit_folium import st_folium
 
 from athena import count_uprns_in_polygon, fetch_uprns_in_polygon
 from area_analysis import PolygonAnalysis
+import nav
 
 POLYGONS_FILE = "polygons.geojson"
 THATCHAM = (51.4035, -1.2614)
@@ -97,6 +98,7 @@ function(cluster) {{
 # Map
 # ---------------------------------------------------------------------------
 
+nav.render()
 st.title("House Counter")
 
 m = folium.Map(location=THATCHAM, zoom_start=13, tiles="OpenStreetMap")
@@ -155,7 +157,7 @@ for feat in st.session_state.polygons:
 
 output = st_folium(
     m,
-    use_container_width=True,
+    width="stretch",
     height=600,
     returned_objects=["last_active_drawing"],
 )
