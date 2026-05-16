@@ -75,40 +75,51 @@ See [PRICE-PAID.md](PRICE-PAID.md) for the full schema, partitioning strategy, a
 
 ## Architecture
 
-```
-Streamlit UI (app.py)
-    │
-    ├── Polygon drawing → polygons.geojson (session persistence)
-    │
-    ├── Geospatial processing (geo.py)
-    │       WGS84 ↔ OSGB36 transforms, area calculation, grid tile lookup
-    │
-    ├── AWS Athena query (athena.py)
-    │       Filters by National Grid partition, then bounding box, then point-in-polygon
-    │
-    ├── Density metrics (area_analysis.py)
-    │       DPH, m² per address
-    │
-    └── HTML export (package.py)
-            Self-contained Leaflet map + summary table → output.html
-```
+The app is structured in three layers, each with a single responsibility:
 
-Queries use a two-stage spatial filter to avoid full-table scans on the 41M-row UPRN dataset: Athena filters by National Grid tile partition and bounding box, then Shapely performs the exact point-in-polygon test in Python.
+**Pages** (`pages/`) — display only. No SQL, no spatial logic, no business calculations. Pages call query functions and render the results.
+
+**Queries** (`queries/`) — one file per data source. Each file owns the SQL for that source, the partition/bbox strategy, and any post-query filtering (e.g. exact point-in-polygon tests). No boto3 here.
+
+**Plumbing** (`queries/athena.py`) — the only file that touches boto3. Executes SQL, polls for completion, handles errors, and returns results as plain Python dicts. No SQL, no domain logic.
+
+Supporting modules at the root handle geometry (`geo.py`), density metrics (`area_analysis.py`), and polygon persistence (`polygons.py`).
+
+Queries use a two-stage spatial filter to avoid full-table scans on large datasets: Athena filters by partition key and bounding box, then Shapely performs the exact point-in-polygon test in Python.
 
 ## Project structure
 
-| File | Purpose |
-|------|---------|
-| `app.py` | Main Streamlit application |
-| `athena.py` | AWS Athena queries for UPRN data |
-| `area_analysis.py` | `PolygonAnalysis` dataclass — area and density calculations |
-| `geo.py` | Coordinate transforms, polygon area, partition tile lookup |
-| `package.py` | HTML report generator |
-| `test_area_analysis.py` | Unit tests for area and density calculations |
-| `requirements.txt` | Python dependencies |
-| `polygons.geojson` | Saved polygons (auto-created at runtime) |
-| `UPRN.md` | OS Open UPRN data source documentation |
-| `PRICE-PAID.md` | Land Registry Price Paid data source documentation |
+```
+house-counter/
+├── app.py                      # Entry point — redirects to Manage Polygons
+├── nav.py                      # Shared navigation bar and data attributions
+├── geo.py                      # WGS84 ↔ OSGB36 transforms, area, partition tile lookup
+├── area_analysis.py            # PolygonAnalysis — DPH, m² per address, density metrics
+├── polygons.py                 # Load/save polygons.geojson, make_feature()
+├── package.py                  # HTML report export
+│
+├── queries/                    # All data access — one file per data source
+│   ├── athena.py               # boto3 plumbing only: run_query(), run_query_rows()
+│   ├── uprn_queries.py         # OS Open UPRN + VOA rating list queries
+│   ├── price_paid_queries.py   # Land Registry Price Paid queries
+│   └── bua_queries.py          # ONS Built-up Area boundary queries
+│
+├── pages/                      # Streamlit pages — display only, no business logic
+│   ├── 0_Manage_Polygons.py    # Draw, import, edit and delete polygons
+│   ├── 1_House_Counter.py      # Count residential/commercial addresses per polygon
+│   └── 2_Price_Paid.py         # House price analysis and trends
+│
+├── docs/                       # Data source reference documentation
+│   ├── UPRN.md
+│   ├── PRICE-PAID.md
+│   ├── CODE-POINT.md
+│   ├── BUA-BOUNDARIES.md
+│   └── VOA.md
+│
+├── test_area_analysis.py       # Unit tests for area and density calculations
+├── requirements.txt            # Python dependencies
+└── polygons.geojson            # Saved polygons (auto-created at runtime)
+```
 
 ## Running tests
 

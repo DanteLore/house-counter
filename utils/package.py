@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from area_analysis import PolygonAnalysis
+from utils.area_analysis import PolygonAnalysis
 
 POLYGONS_FILE = Path("polygons.geojson")
 OUTPUT_FILE = Path("output.html")

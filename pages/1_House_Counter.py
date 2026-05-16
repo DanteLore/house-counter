@@ -4,10 +4,10 @@ from folium import JsCode
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 
-import nav
-from area_analysis import PolygonAnalysis
-from athena import fetch_all_counts_for_polygon, fetch_uprns_in_polygon
-from polygons import DEFAULT_COLOR, load_polygons, save_polygons
+import utils.nav as nav
+from utils.area_analysis import PolygonAnalysis
+from queries.uprn_queries import fetch_all_counts_for_polygon, fetch_uprns_in_polygon
+from utils.polygons import DEFAULT_COLOR, load_polygons, save_polygons
 
 THATCHAM = (51.4035, -1.2614)
 

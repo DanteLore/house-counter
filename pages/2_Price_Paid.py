@@ -1,5 +1,3 @@
-import json
-import os
 import statistics
 
 import folium
@@ -9,14 +7,12 @@ import plotly.graph_objects as go
 import streamlit as st
 from streamlit_folium import st_folium
 
-import nav
-from price_paid_athena import (
+import utils.nav as nav
+from queries.price_paid_queries import (
     fetch_price_stats_for_polygon,
     fetch_price_stats_national,
 )
-
-POLYGONS_FILE = "polygons.geojson"
-DEFAULT_COLOR = "#3388ff"
+from utils.polygons import DEFAULT_COLOR, load_polygons
 
 st.set_page_config(page_title="Price Paid Analysis", layout="wide")
 
@@ -36,12 +32,7 @@ st.title("Price Paid Analysis")
 # Load polygons
 # ---------------------------------------------------------------------------
 
-def load_polygons():
-    if not os.path.exists(POLYGONS_FILE):
-        return []
-    with open(POLYGONS_FILE) as f:
-        fc = json.load(f)
-    return fc.get("features", [])
+
 
 
 polygons = load_polygons()

@@ -1,6 +1,6 @@
 import pytest
 from pyproj import Transformer
-from area_analysis import PolygonAnalysis
+from utils.area_analysis import PolygonAnalysis
 
 _osgb_to_wgs84 = Transformer.from_crs("EPSG:27700", "EPSG:4326", always_xy=True)
 

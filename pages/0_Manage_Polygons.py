@@ -5,10 +5,10 @@ import streamlit as st
 from folium.plugins import Draw
 from streamlit_folium import st_folium
 
-import nav
-from area_analysis import PolygonAnalysis
-from bua_athena import fetch_bua_as_geojson_coords, search_buas
-from polygons import DEFAULT_COLOR, load_polygons, make_feature, save_polygons
+import utils.nav as nav
+from utils.area_analysis import PolygonAnalysis
+from queries.bua_queries import fetch_bua_as_geojson_coords, search_buas
+from utils.polygons import DEFAULT_COLOR, load_polygons, make_feature, save_polygons
 
 THATCHAM = (51.4035, -1.2614)
 

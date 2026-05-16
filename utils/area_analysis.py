@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Callable, Optional
-from geo import polygon_area_m2
+from utils.geo import polygon_area_m2
 
 
 @dataclass
