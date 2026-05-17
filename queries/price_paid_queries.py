@@ -40,8 +40,10 @@ def _aggregate_by_year(by_year):
             "max_price": max(prices),
             "mean_price": statistics.mean(prices),
             "median_price": statistics.median(prices),
+            "p5_price":  prices[max(0, int(n * 0.05) - 1)],
             "p25_price": prices[max(0, int(n * 0.25) - 1)],
             "p75_price": prices[min(n - 1, int(n * 0.75))],
+            "p95_price": prices[min(n - 1, int(n * 0.95))],
         })
     return result
 

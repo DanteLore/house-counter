@@ -292,7 +292,7 @@ national = st.session_state.pp_national or []
 _latest_year = max((r["year"] for r in national), default=None)
 
 def _complete(rows):
-    """Filter a list of year-keyed dicts to exclude the latest (incomplete) year."""
+    """Exclude the latest (incomplete) year from a list of year-keyed dicts."""
     return [r for r in rows if r["year"] != _latest_year]
 
 national = _complete(national)
@@ -347,6 +347,42 @@ def _price_label(adjust):
     return f"Sale price ({_cpi_base_year} £)" if adjust else "Sale price (£)"
 
 
+_all_years = sorted({
+    year
+    for feat in loaded
+    for year, _ in st.session_state.pp_results[
+        feat["properties"].get("id", feat["properties"].get("name"))
+    ].get("prices", [])
+    if year != _latest_year
+})
+
+
+def _year_range_selector(key_prefix):
+    """Render from/to year selectors and return (from_year, to_year) or (None, None)."""
+    if not _all_years:
+        return None, None
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c2:
+        from_yr = st.selectbox("From year", _all_years, index=0,
+                               key=f"{key_prefix}_from")
+    with c3:
+        to_yr = st.selectbox("To year", _all_years, index=len(_all_years) - 1,
+                             key=f"{key_prefix}_to")
+    return from_yr, to_yr
+
+
+def _filter(rows, from_year=None, to_year=None):
+    """Filter year-keyed dicts to a year range, excluding the latest incomplete year."""
+    return [r for r in rows
+            if r["year"] != _latest_year
+            and (from_year is None or r["year"] >= from_year)
+            and (to_year   is None or r["year"] <= to_year)]
+
+
+
+st.divider()
+
+
 # ---------------------------------------------------------------------------
 # Section 1: Price distribution summary table
 # ---------------------------------------------------------------------------
@@ -355,40 +391,49 @@ st.subheader("Price distribution")
 _adj_table = st.toggle("Adjust for inflation (current £)", key="adj_table", value=False)
 if _adj_table:
     _cpi_warning()
+_table_from, _table_to = _year_range_selector("table")
 st.markdown(
-    "Overall price spread across all years of sales data. "
+    "Overall price spread across the selected years of sales data. "
     "The median is the middle sale price — half of all sales were above and half below. "
-    "The lower (P25) and upper (P75) quartiles show the typical range, "
-    "excluding the cheapest and most expensive quarter of transactions."
+    "P25 and P75 show the middle 50% range. "
+    "P5 and P95 show the 90% range: 90% of all sales fell between these two values."
 )
 
-col_headers = st.columns([3, 2, 2, 2, 2, 2])
+col_headers = st.columns([3, 2, 2, 2, 2, 2, 2, 2])
 col_headers[0].markdown("**Polygon**")
-col_headers[1].markdown("**Min ever**")
-col_headers[2].markdown("**Lower quartile**")
+col_headers[1].markdown("**P5**")
+col_headers[2].markdown("**Lower quartile (P25)**")
 col_headers[3].markdown("**Median**")
-col_headers[4].markdown("**Upper quartile**")
-col_headers[5].markdown("**Max ever**")
+col_headers[4].markdown("**Upper quartile (P75)**")
+col_headers[5].markdown("**P95**")
+col_headers[6].markdown("**Min ever**")
+col_headers[7].markdown("**Max ever**")
 
 for feat in loaded:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
     name = feat["properties"].get("name", poly_id)
-    year_prices = st.session_state.pp_results[poly_id].get("prices", [])
-    # Complete-year filter: exclude the latest (incomplete) year
-    year_prices = [(y, p) for y, p in year_prices if y != _latest_year]
+    year_prices = [(y, p) for y, p in st.session_state.pp_results[poly_id].get("prices", [])
+                   if y != _latest_year
+                   and (_table_from is None or y >= _table_from)
+                   and (_table_to   is None or y <= _table_to)]
     if not year_prices:
         continue
     prices = sorted(p for _, p in _deflate_prices(year_prices, _adj_table))
     n = len(prices)
+    p5  = prices[max(0, int(n * 0.05) - 1)]
     p25 = prices[max(0, int(n * 0.25) - 1)]
     p75 = prices[min(n - 1, int(n * 0.75))]
+    p95 = prices[min(n - 1, int(n * 0.95))]
 
-    cols = st.columns([3, 2, 2, 2, 2, 2])
+    cols = st.columns([3, 2, 2, 2, 2, 2, 2, 2])
     cols[0].markdown(name)
-    cols[1].markdown(f"£{min(prices):,.0f}")
+    cols[1].markdown(f"£{p5:,.0f}")
     cols[2].markdown(f"£{p25:,.0f}")
     cols[3].markdown(f"£{statistics.median(prices):,.0f}")
     cols[4].markdown(f"£{p75:,.0f}")
+    cols[5].markdown(f"£{p95:,.0f}")
+    cols[6].markdown(f"£{min(prices):,.0f}")
+    cols[7].markdown(f"£{max(prices):,.0f}")
     cols[5].markdown(f"£{max(prices):,.0f}")
 
 st.divider()
@@ -410,34 +455,14 @@ st.markdown(
     "and detached houses at the other)."
 )
 
-# Derive all available years across loaded polygons
-_all_years = sorted({
-    year
-    for feat in loaded
-    for year, _ in st.session_state.pp_results[
-        feat["properties"].get("id", feat["properties"].get("name"))
-    ].get("prices", [])
-})
-
+_hist_from, _hist_to = _year_range_selector("hist")
 if _all_years:
-    _current_year = _all_years[-1]
-    _default_start = str(max(int(_current_year) - 1, int(_all_years[0])))
-
-    hcol1, hcol2, hcol3, hcol4, hcol5 = st.columns([2, 1, 1, 1, 1])
+    hcol1, hcol2 = st.columns([2, 1])
+    with hcol1:
+        price_min = st.number_input("Min price (£)", value=75_000, step=5_000, key="hist_price_min")
     with hcol2:
-        hist_start = st.selectbox("From year", _all_years, index=_all_years.index(_default_start),
-                                  key="hist_start")
-    with hcol3:
-        hist_end = st.selectbox("To year", _all_years, index=len(_all_years) - 1,
-                                key="hist_end")
-    with hcol4:
-        price_min = st.number_input("Min price (£)", value=75_000, step=5_000,
-                                    key="hist_price_min")
-    with hcol5:
-        price_max = st.number_input("Max price (£)", value=1_000_000, step=25_000,
-                                    key="hist_price_max")
+        price_max = st.number_input("Max price (£)", value=1_000_000, step=25_000, key="hist_price_max")
 else:
-    hist_start = hist_end = None
     price_min, price_max = 75_000, 1_000_000
 
 fig_hist = go.Figure()
@@ -449,10 +474,10 @@ for feat in loaded:
     if not year_prices:
         continue
 
-    if hist_start and hist_end:
-        filtered = [(y, p) for y, p in year_prices if hist_start <= y <= hist_end]
-    else:
-        filtered = list(year_prices)
+    filtered = [(y, p) for y, p in year_prices
+                if y != _latest_year
+                and (_hist_from is None or y >= _hist_from)
+                and (_hist_to   is None or y <= _hist_to)]
     prices = [p for _, p in _deflate_prices(filtered, _adj_hist)]
 
     prices = [p for p in prices if price_min <= p <= price_max]
@@ -492,15 +517,16 @@ st.subheader("Median price trends")
 _adj_trend = st.toggle("Adjust for inflation (current £)", key="adj_trend", value=False)
 if _adj_trend:
     _cpi_warning()
+_trend_from, _trend_to = _year_range_selector("trend")
 
-_nat_trend = _complete(_real_national_stats(_adj_trend))
+_nat_trend = _filter(_real_national_stats(_adj_trend), _trend_from, _trend_to)
 _nat_trend_by_yr = _by_year(_nat_trend)
 
 narrative_parts = []
 for feat in loaded:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
     name = feat["properties"].get("name", poly_id)
-    stats = _complete(_real_stats(poly_id, _adj_trend))
+    stats = _filter(_real_stats(poly_id, _adj_trend), _trend_from, _trend_to)
     if not stats:
         continue
     latest = stats[-1]
@@ -528,7 +554,7 @@ for feat in loaded:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
     name = feat["properties"].get("name", poly_id)
     color = feat["properties"].get("color", DEFAULT_COLOR)
-    stats = _complete(_real_stats(poly_id, _adj_trend))
+    stats = _filter(_real_stats(poly_id, _adj_trend), _trend_from, _trend_to)
 
     years = [r["year"] for r in stats]
 
@@ -606,7 +632,7 @@ if national:
         poly_id = feat["properties"].get("id", feat["properties"].get("name"))
         name = feat["properties"].get("name", poly_id)
         color = feat["properties"].get("color", DEFAULT_COLOR)
-        stats = _complete(st.session_state.pp_results[poly_id]["stats"])
+        stats = _filter(st.session_state.pp_results[poly_id]["stats"])
 
         years, vals = [], []
         for r in stats:
@@ -653,7 +679,7 @@ if base_year:
     for feat in loaded:
         poly_id = feat["properties"].get("id", feat["properties"].get("name"))
         name = feat["properties"].get("name", poly_id)
-        stats = _complete(st.session_state.pp_results[poly_id]["stats"])
+        stats = _filter(st.session_state.pp_results[poly_id]["stats"])
         by_yr = _by_year(stats)
         base_val = _float(by_yr.get(base_year, {}).get("median_price"))
         latest_val = _float(stats[-1]["median_price"]) if stats else None
@@ -684,7 +710,7 @@ if base_year:
         poly_id = feat["properties"].get("id", feat["properties"].get("name"))
         name = feat["properties"].get("name", poly_id)
         color = feat["properties"].get("color", DEFAULT_COLOR)
-        stats = _complete(st.session_state.pp_results[poly_id]["stats"])
+        stats = _filter(st.session_state.pp_results[poly_id]["stats"])
         by_yr = _by_year(stats)
 
         base_val = _float(by_yr.get(base_year, {}).get("median_price"))
@@ -752,7 +778,7 @@ if base_year:
                 poly_id = feat["properties"].get("id", feat["properties"].get("name"))
                 name = feat["properties"].get("name", poly_id)
                 color = feat["properties"].get("color", DEFAULT_COLOR)
-                stats = _complete(st.session_state.pp_results[poly_id]["stats"])
+                stats = _filter(st.session_state.pp_results[poly_id]["stats"])
                 by_yr = _by_year(stats)
 
                 base_val = _float(by_yr.get(base_year, {}).get("median_price"))
@@ -797,6 +823,7 @@ DURATION_LABELS      = {"F": "Freehold", "L": "Leasehold", "U": "Unknown"}
 OLD_NEW_LABELS       = {"Y": "New build", "N": "Established"}
 
 st.subheader("Property mix")
+_mix_from, _mix_to = _year_range_selector("mix")
 st.markdown(
     "Breakdown of sales by property type, tenure, and new/established build — "
     "shown as a percentage of all sales in each year. "
@@ -812,7 +839,7 @@ for feat in loaded:
         st.caption(f"No mix data for {name} — re-fetch to load.")
         continue
 
-    mix = _complete(mix)
+    mix = _filter(mix, _mix_from, _mix_to)
     st.markdown(f"**{name}**")
 
     # Build {year: {category: count}} for each dimension
@@ -871,7 +898,7 @@ for feat in loaded:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
     name = feat["properties"].get("name", poly_id)
     uprn_count = feat["properties"].get("uprn_count")
-    stats = _complete(st.session_state.pp_results[poly_id]["stats"])
+    stats = _filter(st.session_state.pp_results[poly_id]["stats"])
     if not stats or not uprn_count:
         continue
     recent = [r for r in stats if int(r["year"]) >= 2015]
@@ -904,7 +931,7 @@ for feat in loaded:
     name = feat["properties"].get("name", poly_id)
     color = feat["properties"].get("color", DEFAULT_COLOR)
     uprn_count = feat["properties"].get("uprn_count")
-    stats = _complete(st.session_state.pp_results[poly_id]["stats"])
+    stats = _filter(st.session_state.pp_results[poly_id]["stats"])
 
     if not uprn_count:
         continue
