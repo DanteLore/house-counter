@@ -381,6 +381,105 @@ WHERE p.record_status != 'D'
     return _aggregate_by_year(by_year)
 
 
+def fetch_price_by_type_for_county(county_name):
+    """Return yearly median prices by property type for all sales within a CTYUA boundary.
+
+    Returns a list of dicts: {year, property_type, count, median_price, p25_price, p75_price}
+    """
+    poly, bounds = _fetch_ctyua_boundary(county_name)
+    if poly is None:
+        return []
+
+    sql_areas = f"""
+SELECT DISTINCT postcode_area
+FROM {ATHENA_DB}.{CODEPOINT_TABLE}
+WHERE eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
+  AND northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
+""".strip()
+    area_rows = run_query(sql_areas)
+    postcode_areas = {r["postcode_area"] for r in area_rows if r.get("postcode_area")}
+    if not postcode_areas:
+        return []
+
+    area_list = ", ".join(f"'{a}'" for a in postcode_areas)
+
+    sql = f"""
+SELECT
+    p.year,
+    p.property_type,
+    CAST(p.price AS double) AS price,
+    c.eastings,
+    c.northings
+FROM {ATHENA_DB}.{PPD_TABLE} p
+JOIN {ATHENA_DB}.{CODEPOINT_TABLE} c
+  ON c.postcode = p.postcode
+ AND c.postcode_area = LOWER(REGEXP_EXTRACT(p.postcode, '^([A-Z]{{1,2}})', 1))
+WHERE p.record_status != 'D'
+  AND p.ppd_category_type = 'A'
+  AND p.property_type != 'O'
+  AND c.postcode_area IN ({area_list})
+  AND c.eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
+  AND c.northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
+""".strip()
+
+    records = run_query(sql)
+
+    by_key = {}
+    for r in records:
+        try:
+            e     = float(r["eastings"])
+            n     = float(r["northings"])
+            price = float(r["price"])
+        except (ValueError, KeyError):
+            continue
+        if not poly.contains(Point(e, n)):
+            continue
+        by_key.setdefault((r["year"], r["property_type"]), []).append(price)
+
+    result = []
+    for (year, pt), prices in sorted(by_key.items()):
+        prices_sorted = sorted(prices)
+        n = len(prices_sorted)
+        result.append({
+            "year":          year,
+            "property_type": pt,
+            "count":         n,
+            "median_price":  statistics.median(prices_sorted),
+            "p25_price":     prices_sorted[max(0, int(n * 0.25) - 1)],
+            "p75_price":     prices_sorted[min(n - 1, int(n * 0.75))],
+        })
+    return result
+
+
+def fetch_price_by_type_national():
+    """Return yearly median prices by property type aggregated across England & Wales."""
+    sql = f"""
+SELECT
+    year,
+    property_type,
+    COUNT(*) AS count,
+    approx_percentile(CAST(price AS double), 0.25) AS p25_price,
+    approx_percentile(CAST(price AS double), 0.5)  AS median_price,
+    approx_percentile(CAST(price AS double), 0.75) AS p75_price
+FROM {ATHENA_DB}.{PPD_TABLE}
+WHERE record_status != 'D'
+  AND ppd_category_type = 'A'
+  AND property_type != 'O'
+GROUP BY year, property_type
+ORDER BY year, property_type
+""".strip()
+    rows = run_query(sql)
+    return [
+        {**r,
+         "count":        int(r["count"]),
+         "median_price": float(r["median_price"]),
+         "p25_price":    float(r["p25_price"]),
+         "p75_price":    float(r["p75_price"]),
+         }
+        for r in rows
+    ]
+
+
 def fetch_price_stats_national():
     """Return yearly price stats aggregated across all of England & Wales."""
     sql = f"""

@@ -13,7 +13,9 @@ import utils.nav as nav
 from queries.price_paid_queries import (
     fetch_price_stats_for_polygon,
     fetch_price_stats_national,
+    fetch_price_by_type_national,
     fetch_price_stats_for_county,
+    fetch_price_by_type_for_county,
     fetch_all_county_names,
     fetch_mix_for_polygon,
     fetch_price_by_type_for_polygon,
@@ -123,26 +125,26 @@ def load_national_cache():
     return None
 
 
-def save_national_cache(stats, cpi):
+def save_national_cache(stats, cpi, price_by_type=None):
     with open(NATIONAL_CACHE_FILE, "w") as f:
-        json.dump({"stats": stats, "cpi": cpi}, f)
+        json.dump({"stats": stats, "cpi": cpi, "price_by_type": price_by_type}, f)
 
 
 def load_county_cache():
-    """Return {"names": [...], "stats": {county: [rows]}, "comparison": str} from disk, or defaults."""
+    """Return {"names": [...], "stats": {county: [rows]}, "by_type": {county: [rows]}, "comparison": str}."""
     if os.path.exists(COUNTY_CACHE_FILE):
         with open(COUNTY_CACHE_FILE) as f:
             data = json.load(f)
         if isinstance(data, dict) and "names" in data:
             return data
-        # Old format: bare dict of {county: stats} — migrate transparently
-        return {"names": None, "stats": data, "comparison": None}
-    return {"names": None, "stats": {}, "comparison": None}
+        return {"names": None, "stats": data, "by_type": {}, "comparison": None}
+    return {"names": None, "stats": {}, "by_type": {}, "comparison": None}
 
 
-def save_county_cache(names, stats, comparison=None):
+def save_county_cache(names, stats, comparison=None, by_type=None):
     with open(COUNTY_CACHE_FILE, "w") as f:
-        json.dump({"names": names, "stats": stats, "comparison": comparison}, f)
+        json.dump({"names": names, "stats": stats,
+                   "by_type": by_type or {}, "comparison": comparison}, f)
 
 
 # ---------------------------------------------------------------------------
@@ -153,12 +155,14 @@ if "pp_results" not in st.session_state:
     st.session_state.pp_results = {}
 if "pp_national" not in st.session_state or "pp_cpi" not in st.session_state:
     cached = load_national_cache() or {}
-    st.session_state.pp_national = cached.get("stats")
-    st.session_state.pp_cpi      = cached.get("cpi")
+    st.session_state.pp_national          = cached.get("stats")
+    st.session_state.pp_cpi               = cached.get("cpi")
+    st.session_state.pp_national_by_type  = cached.get("price_by_type")
 if "pp_county_cache" not in st.session_state:
     _county_disk = load_county_cache()
-    st.session_state.pp_county_cache  = _county_disk["stats"]
-    st.session_state.pp_county_names  = _county_disk["names"]
+    st.session_state.pp_county_cache         = _county_disk["stats"]
+    st.session_state.pp_county_by_type_cache = _county_disk.get("by_type", {})
+    st.session_state.pp_county_names         = _county_disk["names"]
     st.session_state.pp_comparison_selection = (
         _county_disk.get("comparison") or "National (England & Wales)"
     )
@@ -213,9 +217,15 @@ def ensure_national_data():
     if st.session_state.pp_national is None:
         with st.spinner("Fetching national price data…"):
             st.session_state.pp_national = fetch_price_stats_national()
+        with st.spinner("Fetching national price by type…"):
+            st.session_state.pp_national_by_type = fetch_price_by_type_national()
         with st.spinner("Fetching CPI inflation data…"):
             st.session_state.pp_cpi = fetch_cpi_by_year()
-        save_national_cache(st.session_state.pp_national, st.session_state.pp_cpi)
+        save_national_cache(
+            st.session_state.pp_national,
+            st.session_state.pp_cpi,
+            st.session_state.pp_national_by_type,
+        )
 
 
 def _current_comparison():
@@ -226,14 +236,19 @@ def ensure_county_names():
     if st.session_state.pp_county_names is None:
         with st.spinner("Loading county list…"):
             st.session_state.pp_county_names = fetch_all_county_names()
-        save_county_cache(st.session_state.pp_county_names, st.session_state.pp_county_cache, _current_comparison())
+        save_county_cache(st.session_state.pp_county_names, st.session_state.pp_county_cache,
+                          _current_comparison(), st.session_state.pp_county_by_type_cache)
 
 
 def fetch_county_stats(county_name):
     with st.spinner(f"Fetching price data for {county_name}…"):
         stats = fetch_price_stats_for_county(county_name)
-    st.session_state.pp_county_cache[county_name] = stats
-    save_county_cache(st.session_state.pp_county_names, st.session_state.pp_county_cache, _current_comparison())
+    with st.spinner(f"Fetching price by type for {county_name}…"):
+        by_type = fetch_price_by_type_for_county(county_name)
+    st.session_state.pp_county_cache[county_name]         = stats
+    st.session_state.pp_county_by_type_cache[county_name] = by_type
+    save_county_cache(st.session_state.pp_county_names, st.session_state.pp_county_cache,
+                      _current_comparison(), st.session_state.pp_county_by_type_cache)
 
 
 with st.container():
@@ -373,13 +388,22 @@ national = exclude_incomplete_year(national)
 # comparison / comparison_label: what we compare each polygon against.
 # Either national E&W stats, or a cached county's stats.
 if selected_county and selected_county in st.session_state.pp_county_cache:
-    comparison       = exclude_incomplete_year(st.session_state.pp_county_cache[selected_county])
-    comparison_label = selected_county
+    comparison          = exclude_incomplete_year(st.session_state.pp_county_cache[selected_county])
+    comparison_label    = selected_county
+    _cmp_by_type_raw    = st.session_state.pp_county_by_type_cache.get(selected_county, [])
 else:
-    comparison       = national
-    comparison_label = "National"
+    comparison          = national
+    comparison_label    = "National"
+    _cmp_by_type_raw    = st.session_state.get("pp_national_by_type") or []
 
 comparison_by_year = {r["year"]: r for r in comparison}
+
+# {(year, property_type): row} for the comparison baseline, latest year excluded
+comparison_by_type = {
+    (r["year"], r["property_type"]): r
+    for r in _cmp_by_type_raw
+    if r["year"] != latest_year
+}
 
 
 def filter_to_year_range(rows, from_year=None, to_year=None):
@@ -1018,6 +1042,30 @@ def price_by_type_chart(feat, from_year, to_year, adjust):
             customdata=counts,
             hovertemplate="%{x}: £%{y:,.0f} median (%{customdata} sales)<extra>" + label + "</extra>",
         ))
+
+        # Comparison baseline for this property type — dashed line, same colour
+        cmp_pt_rows = sorted(
+            [r for (y, t), r in comparison_by_type.items()
+             if t == pt and (from_year is None or y >= from_year) and (to_year is None or y <= to_year)],
+            key=lambda r: r["year"],
+        )
+        if cmp_pt_rows:
+            if adjust and cpi:
+                cmp_medians = [deflate_prices([(r["year"], r["median_price"])], cpi, cpi_base_year)[0][1]
+                               for r in cmp_pt_rows]
+            else:
+                cmp_medians = [_safe_float(r["median_price"]) for r in cmp_pt_rows]
+            fig.add_trace(go.Scatter(
+                x=[r["year"] for r in cmp_pt_rows],
+                y=cmp_medians,
+                mode="lines",
+                name=f"{comparison_label} {label}",
+                legendgroup=label,
+                showlegend=False,
+                line=dict(color=color, width=1, dash="dash"),
+                hovertemplate="%{x}: £%{y:,.0f}<extra>" + f"{comparison_label} {label}" + "</extra>",
+            ))
+
     fig.update_layout(**chart_layout(yaxis_title=price_axis_label(adjust), xaxis_title="Year"))
     return fig
 
@@ -1588,20 +1636,38 @@ for feat in loaded:
     if fig:
         st.plotly_chart(fig, width="stretch")
 
-    # Data table: median, count, P25, P75 per type per year
+    # Data table: polygon rows + comparison baseline rows, sorted by year then type
     pbt_rows = []
     for r in sorted(pbt, key=lambda r: (r["year"], r["property_type"])):
-        if r["year"] == latest_year:
-            continue
         pbt_rows.append({
-            "Year":  r["year"],
-            "Type":  PROPERTY_TYPE_LABELS.get(r["property_type"], r["property_type"]),
-            "Sales": r["count"],
+            "Area":   name,
+            "Year":   r["year"],
+            "Type":   PROPERTY_TYPE_LABELS.get(r["property_type"], r["property_type"]),
+            "Sales":  r["count"],
             "Median": f"£{r['median_price']:,.0f}",
             "P25":    f"£{r['p25_price']:,.0f}",
             "P75":    f"£{r['p75_price']:,.0f}",
         })
-    show_data_table(pbt_rows, f"{name} — price by type")
+    for (year, pt), r in sorted(comparison_by_type.items()):
+        if pt not in PROPERTY_TYPE_LABELS:
+            continue
+        if type_from and year < type_from:
+            continue
+        if type_to and year > type_to:
+            continue
+        pbt_rows.append({
+            "Area":   comparison_label,
+            "Year":   year,
+            "Type":   PROPERTY_TYPE_LABELS[pt],
+            "Sales":  r["count"],
+            "Median": f"£{_safe_float(r['median_price']):,.0f}",
+            "P25":    f"£{_safe_float(r['p25_price']):,.0f}",
+            "P75":    f"£{_safe_float(r['p75_price']):,.0f}",
+        })
+    show_data_table(
+        sorted(pbt_rows, key=lambda r: (r["Year"], r["Type"], r["Area"])),
+        f"{name} — price by type vs {comparison_label}",
+    )
 
 if not any_type_data:
     st.caption("Re-fetch polygon data to load price-by-type breakdown.")
