@@ -77,6 +77,7 @@ JOIN {ATHENA_DB}.{CODEPOINT_TABLE} c
   ON c.postcode = p.postcode
  AND c.postcode_area = LOWER(REGEXP_EXTRACT(p.postcode, '^([A-Z]{{1,2}})', 1))
 WHERE p.record_status != 'D'
+  AND p.property_type != 'O'
   AND c.postcode_area IN ({area_list})
   AND c.eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
   AND c.northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
@@ -132,6 +133,7 @@ JOIN {ATHENA_DB}.{CODEPOINT_TABLE} c
   ON c.postcode = p.postcode
  AND c.postcode_area = LOWER(REGEXP_EXTRACT(p.postcode, '^([A-Z]{{1,2}})', 1))
 WHERE p.record_status != 'D'
+  AND p.property_type != 'O'
   AND c.postcode_area IN ({area_list})
   AND c.eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
   AND c.northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
@@ -185,6 +187,7 @@ JOIN {ATHENA_DB}.{CODEPOINT_TABLE} c
   ON c.postcode = p.postcode
  AND c.postcode_area = LOWER(REGEXP_EXTRACT(p.postcode, '^([A-Z]{{1,2}})', 1))
 WHERE p.record_status != 'D'
+  AND p.property_type != 'O'
   AND c.postcode_area IN ({area_list})
   AND c.eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
   AND c.northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
@@ -355,6 +358,7 @@ JOIN {ATHENA_DB}.{CODEPOINT_TABLE} c
  AND c.postcode_area = LOWER(REGEXP_EXTRACT(p.postcode, '^([A-Z]{{1,2}})', 1))
 WHERE p.record_status != 'D'
   AND p.ppd_category_type = 'A'
+  AND p.property_type != 'O'
   AND c.postcode_area IN ({area_list})
   AND c.eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
   AND c.northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
@@ -392,6 +396,7 @@ SELECT
 FROM {ATHENA_DB}.{PPD_TABLE}
 WHERE record_status != 'D'
   AND ppd_category_type = 'A'
+  AND property_type != 'O'
 GROUP BY year
 ORDER BY year
 """.strip()

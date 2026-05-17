@@ -382,13 +382,6 @@ else:
 comparison_by_year = {r["year"]: r for r in comparison}
 
 
-def filter_other_type(rows):
-    """Drop 'O' (Other) property type rows when the global exclude_other toggle is on."""
-    if exclude_other:
-        return [r for r in rows if r.get("property_type") != "O"]
-    return rows
-
-
 def filter_to_year_range(rows, from_year=None, to_year=None):
     """Filter year-keyed dicts to a range, always excluding the latest incomplete year."""
     return [r for r in rows
@@ -1071,11 +1064,6 @@ if latest_year:
         f"current year accumulate slowly, making year-to-date figures unreliable for comparison."
     )
 
-exclude_other = st.toggle(
-    "Exclude 'Other' property type (includes commercial sales, park homes, houseboats — not standard residential)",
-    key="exclude_other", value=True,
-)
-
 # ---------------------------------------------------------------------------
 # Market summary
 # ---------------------------------------------------------------------------
@@ -1488,7 +1476,7 @@ st.divider()
 # Section 5: Property mix
 # ---------------------------------------------------------------------------
 
-PROPERTY_TYPE_LABELS = {"D": "Detached", "S": "Semi-detached", "T": "Terraced", "F": "Flat", "O": "Other"}
+PROPERTY_TYPE_LABELS = {"D": "Detached", "S": "Semi-detached", "T": "Terraced", "F": "Flat"}
 DURATION_LABELS      = {"F": "Freehold", "L": "Leasehold", "U": "Unknown"}
 OLD_NEW_LABELS       = {"Y": "New build", "N": "Established"}
 
@@ -1508,7 +1496,7 @@ for feat in loaded:
         continue
     st.markdown(f"**{name}**")
     col1, col2, col3 = st.columns(3)
-    pt_labels = {k: v for k, v in PROPERTY_TYPE_LABELS.items() if not (exclude_other and k == "O")}
+    pt_labels = {k: v for k, v in PROPERTY_TYPE_LABELS.items() if k != "O"}
     col1.plotly_chart(mix_stacked_bar_chart(mix, "property_type", pt_labels, "Property type"), width="stretch")
     col2.plotly_chart(mix_stacked_bar_chart(mix, "duration",      DURATION_LABELS,      "Tenure"),        width="stretch")
     col3.plotly_chart(mix_stacked_bar_chart(mix, "old_new",       OLD_NEW_LABELS,       "New / established"), width="stretch")
@@ -1527,7 +1515,7 @@ for feat in loaded:
         row = {"Year": year, "Total sales": total,
                "New build %": f"{new_builds / total * 100:.1f}%" if total else "—"}
         for code, label in PROPERTY_TYPE_LABELS.items():
-            if exclude_other and code == "O":
+            if code == "O":
                 continue
             cnt = by_type.get(label, 0)
             row[label] = f"{cnt / total * 100:.1f}%" if total else "—"
@@ -1557,7 +1545,7 @@ st.markdown(
 any_type_data = False
 for feat in loaded:
     name = poly_name(feat)
-    pbt  = filter_other_type(filter_to_year_range(poly_price_by_type(feat), type_from, type_to))
+    pbt  = filter_to_year_range(poly_price_by_type(feat), type_from, type_to)
     if not pbt:
         need_fetch = not poly_price_by_type(feat)
         msg = f"No price-by-type data for **{name}** — {'re-fetch to load' if need_fetch else 'no data in range'}."
