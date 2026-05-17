@@ -951,7 +951,7 @@ def relative_growth_chart(base_year, nat_indexed_by_year):
     return fig
 
 
-def mix_stacked_bar_chart(mix, dimension_key, labels, title):
+def mix_stacked_bar_chart(mix, dimension_key, labels, title, colors=None):
     years_set  = sorted({r["year"] for r in mix})
     totals     = {}
     by_category = {}
@@ -965,8 +965,10 @@ def mix_stacked_bar_chart(mix, dimension_key, labels, title):
             by_category.get(code, {}).get(y, 0) / totals[y] * 100 if totals.get(y) else 0
             for y in years_set
         ]
+        kwargs = {"marker_color": colors[code]} if colors and code in colors else {}
         fig.add_trace(go.Bar(x=years_set, y=pcts, name=label,
-                             hovertemplate="%{x}: %{y:.1f}%<extra>" + label + "</extra>"))
+                             hovertemplate="%{x}: %{y:.1f}%<extra>" + label + "</extra>",
+                             **kwargs))
     fig.update_layout(
         barmode="stack", title=title,
         yaxis=dict(ticksuffix="%", range=[0, 100]),
@@ -983,7 +985,6 @@ def price_by_type_chart(feat, from_year, to_year, adjust):
     if not rows:
         return None
     types = sorted({r["property_type"] for r in rows})
-    TYPE_COLORS = {"D": "#1f77b4", "S": "#ff7f0e", "T": "#2ca02c", "F": "#d62728", "O": "#9467bd"}
     fig = go.Figure()
     for pt in types:
         label = PROPERTY_TYPE_LABELS.get(pt, pt)
@@ -1000,7 +1001,7 @@ def price_by_type_chart(feat, from_year, to_year, adjust):
             medians = [_safe_float(r["median_price"]) for r in pt_rows]
             p25s    = [_safe_float(r["p25_price"])    for r in pt_rows]
             p75s    = [_safe_float(r["p75_price"])    for r in pt_rows]
-        color = TYPE_COLORS.get(pt, "#888888")
+        color = PROPERTY_TYPE_COLORS.get(pt, "#888888")
         fig.add_trace(go.Scatter(
             x=years, y=p25s, mode="lines", name=label, legendgroup=label, showlegend=False,
             line=dict(color=color, width=0),
@@ -1476,7 +1477,8 @@ st.divider()
 # Section 5: Property mix
 # ---------------------------------------------------------------------------
 
-PROPERTY_TYPE_LABELS = {"D": "Detached", "S": "Semi-detached", "T": "Terraced", "F": "Flat"}
+PROPERTY_TYPE_LABELS  = {"D": "Detached", "S": "Semi-detached", "T": "Terraced", "F": "Flat"}
+PROPERTY_TYPE_COLORS  = {"D": "#1f77b4", "S": "#ff7f0e", "T": "#2ca02c", "F": "#d62728"}
 DURATION_LABELS      = {"F": "Freehold", "L": "Leasehold", "U": "Unknown"}
 OLD_NEW_LABELS       = {"Y": "New build", "N": "Established"}
 
@@ -1497,7 +1499,7 @@ for feat in loaded:
     st.markdown(f"**{name}**")
     col1, col2, col3 = st.columns(3)
     pt_labels = {k: v for k, v in PROPERTY_TYPE_LABELS.items() if k != "O"}
-    col1.plotly_chart(mix_stacked_bar_chart(mix, "property_type", pt_labels, "Property type"), width="stretch")
+    col1.plotly_chart(mix_stacked_bar_chart(mix, "property_type", pt_labels, "Property type", PROPERTY_TYPE_COLORS), width="stretch")
     col2.plotly_chart(mix_stacked_bar_chart(mix, "duration",      DURATION_LABELS,      "Tenure"),        width="stretch")
     col3.plotly_chart(mix_stacked_bar_chart(mix, "old_new",       OLD_NEW_LABELS,       "New / established"), width="stretch")
 
