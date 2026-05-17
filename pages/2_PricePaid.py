@@ -8,6 +8,7 @@ from price_paid.charts.market_summary import render_market_summary
 from price_paid.charts.price_by_type import render_price_by_type
 from price_paid.charts.price_distribution import render_price_distribution_table, render_price_histogram
 from price_paid.charts.price_trends import render_median_trends, render_indexed_performance
+from price_paid.charts.new_builds import render_new_builds
 from price_paid.charts.property_mix import render_property_mix
 from price_paid.charts.turnover import EW_DWELLING_STOCK, render_annual_turnover, render_volume_by_type
 from price_paid.filters import (
@@ -271,6 +272,10 @@ render_indexed_performance(
     comparison, comparison_by_year, comparison_label, latest_year, _filter,
 )
 render_property_mix(loaded, poly_name, poly_mix, _filter, _yr_sel)
+render_new_builds(
+    loaded, poly_name, poly_color, poly_mix, poly_uprn_count,
+    latest_year, _filter, _yr_sel,
+)
 render_price_by_type(
     loaded, poly_name, poly_price_by_type,
     comparison_by_type, comparison_label,
