@@ -9,6 +9,7 @@ from price_paid.charts.common import (
     chart_layout,
     show_data_table,
 )
+from price_paid.charts.new_build_map import render_new_build_map
 
 
 def _build_new_build_series(mix_rows, latest_year, from_year, to_year):
@@ -118,7 +119,7 @@ def new_builds_by_type_chart(mix_rows, name, latest_year, from_year, to_year, al
 
 
 def render_new_builds(loaded, poly_name_fn, poly_color_fn, poly_mix_fn, poly_uprn_count_fn,
-                       latest_year, filter_fn, year_range_selector_fn):
+                       poly_new_build_locations_fn, latest_year, filter_fn, year_range_selector_fn):
     st.subheader("New build sales")
     from_year, to_year = year_range_selector_fn("nb")
     st.markdown(
@@ -229,4 +230,6 @@ def render_new_builds(loaded, poly_name_fn, poly_color_fn, poly_mix_fn, poly_upr
                 type_rows.append({"Year": y, "Type": label, "New build sales": cnt})
         show_data_table(type_rows, f"{name} - new build sales by type")
 
+    render_new_build_map(loaded, poly_name_fn, poly_color_fn, poly_new_build_locations_fn,
+                         latest_year)
     st.divider()

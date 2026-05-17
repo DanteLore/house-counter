@@ -18,6 +18,7 @@ from queries.price_paid_queries import (
     fetch_all_county_names,
     fetch_mix_for_polygon,
     fetch_price_by_type_for_polygon,
+    fetch_new_build_locations_for_polygon,
     fetch_cpi_by_year,
 )
 from utils.polygons import save_polygons
@@ -61,10 +62,11 @@ def init_session(polygons):
             stored_prices = feat["properties"].get("pp_prices")
             if stored_stats is not None:
                 st.session_state.pp_results[pid] = {
-                    "stats":         stored_stats,
-                    "prices":        [tuple(p) for p in (stored_prices or [])],
-                    "mix":           feat["properties"].get("pp_mix", []),
-                    "price_by_type": feat["properties"].get("pp_price_by_type", []),
+                    "stats":              stored_stats,
+                    "prices":             [tuple(p) for p in (stored_prices or [])],
+                    "mix":                feat["properties"].get("pp_mix", []),
+                    "price_by_type":      feat["properties"].get("pp_price_by_type", []),
+                    "new_build_locations": feat["properties"].get("pp_new_build_locations", []),
                 }
 
 
@@ -101,6 +103,9 @@ def poly_mix(feat):
 def poly_price_by_type(feat):
     return st.session_state.pp_results[_feat_id(feat)].get("price_by_type", [])
 
+def poly_new_build_locations(feat):
+    return st.session_state.pp_results[_feat_id(feat)].get("new_build_locations", [])
+
 
 # ---------------------------------------------------------------------------
 # Data-fetch helpers
@@ -117,18 +122,22 @@ def fetch_polygon_data(feat, polygons):
         mix = fetch_mix_for_polygon(coords)
     with st.spinner(f"Fetching price by type for {name}…"):
         price_by_type = fetch_price_by_type_for_polygon(coords)
+    with st.spinner(f"Fetching new build locations for {name}…"):
+        new_build_locations = fetch_new_build_locations_for_polygon(coords)
 
     st.session_state.pp_results[pid] = {
         "stats": poly_stats_data, "prices": all_prices,
         "mix": mix, "price_by_type": price_by_type,
+        "new_build_locations": new_build_locations,
     }
 
     for i, f in enumerate(polygons):
         if _feat_id(f) == pid:
-            polygons[i]["properties"]["pp_stats"]         = poly_stats_data
-            polygons[i]["properties"]["pp_prices"]        = [list(p) for p in all_prices]
-            polygons[i]["properties"]["pp_mix"]           = mix
-            polygons[i]["properties"]["pp_price_by_type"] = price_by_type
+            polygons[i]["properties"]["pp_stats"]               = poly_stats_data
+            polygons[i]["properties"]["pp_prices"]              = [list(p) for p in all_prices]
+            polygons[i]["properties"]["pp_mix"]                 = mix
+            polygons[i]["properties"]["pp_price_by_type"]       = price_by_type
+            polygons[i]["properties"]["pp_new_build_locations"] = new_build_locations
             break
     save_polygons(polygons)
 

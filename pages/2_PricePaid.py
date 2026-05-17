@@ -36,6 +36,7 @@ from price_paid.session import (
     poly_id,
     poly_mix,
     poly_name,
+    poly_new_build_locations,
     poly_price_by_type,
     poly_prices,
     poly_stats,
@@ -274,7 +275,7 @@ render_indexed_performance(
 render_property_mix(loaded, poly_name, poly_mix, _filter, _yr_sel)
 render_new_builds(
     loaded, poly_name, poly_color, poly_mix, poly_uprn_count,
-    latest_year, _filter, _yr_sel,
+    poly_new_build_locations, latest_year, _filter, _yr_sel,
 )
 render_price_by_type(
     loaded, poly_name, poly_price_by_type,

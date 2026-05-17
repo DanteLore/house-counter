@@ -160,6 +160,65 @@ WHERE p.record_status != 'D'
     ]
 
 
+def fetch_new_build_locations_for_polygon(geojson_coords):
+    """
+    Return new build sales with postcode centroid coordinates (WGS84).
+
+    Returns a list of dicts:
+      {year, property_type, postcode, lat, lon, count}
+    where count is the number of new build sales at that postcode in that year.
+    """
+    from utils.geo import osgb_to_wgs84
+
+    poly = polygon_osgb(geojson_coords)
+    bounds = poly.bounds
+    postcode_areas = _postcode_areas_for_polygon(geojson_coords)
+
+    if not postcode_areas:
+        return []
+
+    area_list = ", ".join(f"'{a}'" for a in postcode_areas)
+
+    sql = f"""
+SELECT
+    p.year,
+    p.property_type,
+    p.postcode,
+    c.eastings,
+    c.northings
+FROM {ATHENA_DB}.{PPD_TABLE} p
+JOIN {ATHENA_DB}.{CODEPOINT_TABLE} c
+  ON c.postcode = p.postcode
+ AND c.postcode_area = LOWER(REGEXP_EXTRACT(p.postcode, '^([A-Z]{{1,2}})', 1))
+WHERE p.record_status != 'D'
+  AND p.property_type != 'O'
+  AND p.old_new = 'Y'
+  AND c.postcode_area IN ({area_list})
+  AND c.eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
+  AND c.northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
+""".strip()
+
+    records = run_query(sql)
+
+    by_key = {}
+    for r in records:
+        try:
+            e = float(r["eastings"])
+            n = float(r["northings"])
+        except (ValueError, KeyError):
+            continue
+        if not poly.contains(Point(e, n)):
+            continue
+        lon, lat = osgb_to_wgs84(e, n)
+        key = (r["year"], r["property_type"], r["postcode"], round(lat, 6), round(lon, 6))
+        by_key[key] = by_key.get(key, 0) + 1
+
+    return [
+        {"year": y, "property_type": pt, "postcode": pc, "lat": lat, "lon": lon, "count": cnt}
+        for (y, pt, pc, lat, lon), cnt in sorted(by_key.items())
+    ]
+
+
 def fetch_price_by_type_for_polygon(geojson_coords):
     """
     Return yearly median prices broken down by property type for sales within the polygon.
