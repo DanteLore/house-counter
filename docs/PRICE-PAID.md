@@ -40,8 +40,8 @@ WHERE year BETWEEN '2010' AND '2024'
 | `property_type` | string | See [Property Type codes](#property-type) below |
 | `old_new` | string | `Y` = newly built; `N` = established residential building |
 | `duration` | string | `F` = freehold; `L` = leasehold; `U` = unknown |
-| `paon` | string | Primary Addressable Object Name — house number or name |
-| `saon` | string | Secondary Addressable Object Name — flat/unit within a building. May be null |
+| `paon` | string | Primary Addressable Object Name  -  house number or name |
+| `saon` | string | Secondary Addressable Object Name  -  flat/unit within a building. May be null |
 | `street` | string | Street name |
 | `locality` | string | Locality / village name. May be null |
 | `town_city` | string | Town or city |
@@ -69,16 +69,16 @@ WHERE year BETWEEN '2010' AND '2024'
 
 | Code | Meaning |
 |---|---|
-| `A` | Standard Price Paid entry — full residential market transaction |
-| `B` | Additional Price Paid entry — transfer under a power of sale / repossession, buy-to-let, or first-time buyer arrangement |
+| `A` | Standard Price Paid entry  -  full residential market transaction |
+| `B` | Additional Price Paid entry  -  transfer under a power of sale / repossession, buy-to-let, or first-time buyer arrangement |
 
 ### Record Status
 
 | Code | Meaning |
 |---|---|
-| `A` | Addition — new record |
-| `C` | Change — amendment to a previously published record |
-| `D` | Delete — record removed from the dataset |
+| `A` | Addition  -  new record |
+| `C` | Change  -  amendment to a previously published record |
+| `D` | Delete  -  record removed from the dataset |
 
 ---
 
@@ -128,10 +128,10 @@ LIMIT 100;
 
 ## Notes
 
-- The dataset covers **England and Wales only** — Scotland and Northern Ireland are not included.
+- The dataset covers **England and Wales only**  -  Scotland and Northern Ireland are not included.
 - `postcode` is occasionally null for older records (pre-2000).
 - `saon` is null for houses; only populated for flats and units within subdivided buildings.
 - Records with `record_status = 'D'` are deletions and should typically be excluded from analysis: `WHERE record_status != 'D'`.
 - For market analysis, filter to `ppd_category_type = 'A'` (standard transactions) to exclude repossessions and atypical transfers.
 - `price` is stored as `bigint`; cast to `double` before arithmetic (e.g. averages): `AVG(CAST(price AS double))`.
-- Data is published monthly — re-run the loader for the current year to pick up new transactions.
+- Data is published monthly  -  re-run the loader for the current year to pick up new transactions.

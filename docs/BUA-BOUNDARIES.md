@@ -1,8 +1,8 @@
 # ONS Built-up Area Boundaries 2024
 
 ONS-defined polygon boundaries for all 7,775 Built-up Areas (BUAs) in England and Wales,
-April 2024 vintage. A Built-up Area is a contiguous area of urban development — towns,
-cities and suburbs — defined by the ONS from OS MasterMap Topography data. BUA boundaries
+April 2024 vintage. A Built-up Area is a contiguous area of urban development  -  towns,
+cities and suburbs  -  defined by the ONS from OS MasterMap Topography data. BUA boundaries
 are stable reference geographies useful for grouping and spatially filtering other datasets
 (house prices, traffic census, UPRN, etc.).
 
@@ -25,7 +25,7 @@ are stable reference geographies useful for grouping and spatially filtering oth
 | `bbox_max_n` | int | Bounding rectangle max northing (OSGB metres) |
 
 All coordinates are in metres for OSGB columns. WKT geometry strings can be large
-(tens to hundreds of KB per feature) — avoid `SELECT *` over many rows.
+(tens to hundreds of KB per feature)  -  avoid `SELECT *` over many rows.
 
 ## Common queries
 
@@ -79,7 +79,7 @@ ORDER BY avg_price DESC
 ```
 
 Note: `town_city` in the house price data is free text and won't always match `bua24nm`
-exactly — consider normalising case or using a postcode-to-BUA lookup via OS Code Point Open.
+exactly  -  consider normalising case or using a postcode-to-BUA lookup via OS Code Point Open.
 
 ### List all areas sorted by size of bounding rectangle (largest first)
 
@@ -121,7 +121,7 @@ if polygon.contains(point):
 **Source:** ONS Open Geography Portal
 ([main_ONS_BUA_2024_EW_V2](https://services1.arcgis.com/ESMARspQHYMw9BZ9/ArcGIS/rest/services/main_ONS_BUA_2024_EW_V2/FeatureServer/0))
 
-BUA boundaries are updated infrequently — the current vintage is April 2024. Check the
+BUA boundaries are updated infrequently  -  the current vintage is April 2024. Check the
 [ONS Open Geography Portal](https://geoportal.statistics.gov.uk/) for new releases and
 re-run the loader when a new vintage is published.
 

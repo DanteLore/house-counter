@@ -13,24 +13,24 @@ one row per year/month.
 |---|---|---|
 | `year` | int | Year |
 | `month` | int | Month number (1–12) |
-| `cpi_index` | double | CPI index (2015=100) — absolute price level, from Jan 1988 |
-| `cpi_rate` | double | CPI 12-month rate % — year-on-year change, from Jan 1989 |
-| `cpih_index` | double | CPIH index (2015=100) — CPI including owner-occupier costs, from Jan 1989 |
-| `cpih_rate` | double | CPIH 12-month rate % — year-on-year change, from Jan 1988 |
-| `rpi_rate` | double | RPI 12-month rate % — year-on-year change, from Jun 1948 |
+| `cpi_index` | double | CPI index (2015=100)  -  absolute price level, from Jan 1988 |
+| `cpi_rate` | double | CPI 12-month rate %  -  year-on-year change, from Jan 1989 |
+| `cpih_index` | double | CPIH index (2015=100)  -  CPI including owner-occupier costs, from Jan 1989 |
+| `cpih_rate` | double | CPIH 12-month rate %  -  year-on-year change, from Jan 1988 |
+| `rpi_rate` | double | RPI 12-month rate %  -  year-on-year change, from Jun 1948 |
 
-No partition key — the table is small (934 rows) and always scanned in full.
+No partition key  -  the table is small (934 rows) and always scanned in full.
 
 ## Which measure to use
 
-- **CPI** — the UK's headline inflation measure since 2003, used by the Bank of England
+- **CPI**  -  the UK's headline inflation measure since 2003, used by the Bank of England
   for its 2% target. Best for deflating recent data (1988+).
-- **CPIH** — CPI plus owner-occupiers' housing costs. ONS's preferred measure since 2017.
+- **CPIH**  -  CPI plus owner-occupiers' housing costs. ONS's preferred measure since 2017.
   Slightly smoother than CPI.
-- **RPI** — older measure, no longer a National Statistic but still widely used in
+- **RPI**  -  older measure, no longer a National Statistic but still widely used in
   contracts and index-linking. The only series with data before 1988.
 
-For deflating house prices use `cpi_index` — divide the nominal price by the index
+For deflating house prices use `cpi_index`  -  divide the nominal price by the index
 value for that month, then multiply by 100 to express in 2015 pounds.
 
 ## Common queries

@@ -94,7 +94,7 @@ class TestQueryUprnPoints:
         assert result[0] == pytest.approx((INSIDE_LAT, INSIDE_LON), rel=1e-6)
 
     def test_point_outside_polygon_is_excluded(self):
-        # Athena bbox filter passes a point just outside the polygon — Python must reject it.
+        # Athena bbox filter passes a point just outside the polygon  -  Python must reject it.
         rows = _raw_uprn_rows([(OUTSIDE_LAT, OUTSIDE_LON)])
         with patch("queries.uprn_queries.run_query_rows", return_value=rows):
             result = uq._query_uprn_points(POLY_COORDS)
@@ -189,7 +189,7 @@ class TestFetchAllCounts:
         assert resid == 7
 
     def test_no_commercial_means_all_residential(self):
-        # A purely residential street — commercial count must not quietly reduce the total.
+        # A purely residential street  -  commercial count must not quietly reduce the total.
         uprn_pts = [(INSIDE_LAT, INSIDE_LON)] * 50
         p1, p2 = self._patch_both(uprn_pts, [])
         with p1, p2:

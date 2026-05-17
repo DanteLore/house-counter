@@ -125,7 +125,7 @@ for feat in st.session_state.polygons:
 st_folium(m, width="stretch", height=600, returned_objects=[])
 
 # ---------------------------------------------------------------------------
-# Polygon table — Count / Show only
+# Polygon table  -  Count / Show only
 # ---------------------------------------------------------------------------
 
 with st.container(border=True):
@@ -162,19 +162,19 @@ with st.container(border=True):
         c0.color_picker("Colour", value=color, key=f"color_{i}",
                         label_visibility="collapsed", disabled=True)
         c1.markdown(name)
-        c2.markdown(f"{area:,.0f}" if area is not None else "—")
+        c2.markdown(f"{area:,.0f}" if area is not None else " - ")
         c3.markdown(f"{analysis.area_ha:,.2f}")
-        c4.markdown(f"{residential:,}" if residential is not None else "—")
-        c5.markdown(f"{commercial:,}" if commercial is not None else "—")
+        c4.markdown(f"{residential:,}" if residential is not None else " - ")
+        c5.markdown(f"{commercial:,}" if commercial is not None else " - ")
         if residential is not None and commercial is not None and commercial > 0:
             c6.markdown(f"{residential / commercial:.1f}")
         else:
-            c6.markdown("—")
+            c6.markdown(" - ")
         density = analysis.density_m2_per_address
-        c7.markdown(f"{density:,.0f}" if density is not None else "—")
+        c7.markdown(f"{density:,.0f}" if density is not None else " - ")
         dph = analysis.dwellings_per_hectare
-        c8.markdown(f"{dph:.1f}" if dph is not None else "—")
-        c9.markdown(f"{address_count:,}" if address_count is not None else "—")
+        c8.markdown(f"{dph:.1f}" if dph is not None else " - ")
+        c9.markdown(f"{address_count:,}" if address_count is not None else " - ")
 
         with c10:
             b1, b2 = st.columns(2)

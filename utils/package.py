@@ -62,7 +62,7 @@ center_lon = (min(all_lons) + max(all_lons)) / 2
 
 def fmt(value, decimals=0):
     if value is None:
-        return "—"
+        return " - "
     return f"{value:,.{decimals}f}"
 
 polygon_js_blocks = []

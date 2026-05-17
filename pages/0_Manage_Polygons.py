@@ -123,7 +123,7 @@ if st.session_state.pending:
     coords = st.session_state.pending["geometry"]["coordinates"]
     analysis = PolygonAnalysis(coords)
     with st.container(border=True):
-        st.caption(f"New polygon — area: {analysis.area_m2:,.0f} m²")
+        st.caption(f"New polygon  -  area: {analysis.area_m2:,.0f} m²")
         pc1, pc2, pc3, pc4 = st.columns([3, 2, 1, 1])
         name_val = pc1.text_input("Name", value="New Area", key="pending_name",
                                   label_visibility="collapsed")
@@ -254,9 +254,9 @@ else:
                     save_polygons(st.session_state.polygons)
                     st.rerun()
 
-            c2.markdown(f"{area:,.0f}" if area is not None else "—")
+            c2.markdown(f"{area:,.0f}" if area is not None else " - ")
             c3.markdown(f"{analysis.area_ha:,.2f}")
-            c4.markdown(f"{count:,}" if count is not None else "—")
+            c4.markdown(f"{count:,}" if count is not None else " - ")
 
             with c5:
                 if st.button("✕ Delete", key=f"delete_{i}", use_container_width=True):

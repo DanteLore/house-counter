@@ -45,7 +45,7 @@ STAT = {
 
 class TestDeflatePrice:
     def test_base_year_price_unchanged(self):
-        # CPI=100 in 2015 — dividing by 100 and multiplying by 100 is a no-op.
+        # CPI=100 in 2015  -  dividing by 100 and multiplying by 100 is a no-op.
         assert deflate_price(200_000, "2015", CPI) == pytest.approx(200_000)
 
     def test_price_halves_when_cpi_doubles(self):
@@ -92,7 +92,7 @@ class TestDeflatePrice:
 # ---------------------------------------------------------------------------
 # real_stats_from_prices
 # ---------------------------------------------------------------------------
-# Prices are deflated first, THEN stats are derived — correct order of operations.
+# Prices are deflated first, THEN stats are derived  -  correct order of operations.
 
 # Raw prices for a polygon in 2022 (CPI=120).  In 2015 £ these are /120*100.
 PRICES_2022 = [("2022", p) for p in [100_000.0, 180_000.0, 240_000.0, 320_000.0, 500_000.0]]

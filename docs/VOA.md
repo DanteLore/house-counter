@@ -2,7 +2,7 @@
 
 All non-domestic (commercially rated) properties in England and Wales, from the
 Valuation Office Agency 2026 compiled rating list. 2.14 million entries covering
-every hereditament (unit of property liable for business rates) — shops, offices,
+every hereditament (unit of property liable for business rates)  -  shops, offices,
 warehouses, factories, pubs, schools, car parks, advertising hoardings and more.
 
 ## Schema
@@ -12,7 +12,7 @@ warehouses, factories, pubs, schools, car parks, advertising hoardings and more.
 
 | Column | Type | Description |
 |---|---|---|
-| `uarn` | string | Unique Address Reference Number — VOA's property identifier (alphanumeric) |
+| `uarn` | string | Unique Address Reference Number  -  VOA's property identifier (alphanumeric) |
 | `ba_code` | string | Billing authority code (local council) |
 | `ndr_community_code` | string | NDR community code |
 | `desc_code` | string | Property type code (see table below) |
@@ -30,26 +30,26 @@ warehouses, factories, pubs, schools, car parks, advertising hoardings and more.
 | `appeal_settlement_code` | string | Appeal status code |
 | `ba_reference` | string | Billing authority's own reference for this property |
 | `list_alteration_date` | string | Date the list entry was last altered (DD-MON-YYYY) |
-| `scat_code` | string | Special Category code — more granular than `desc_code` |
+| `scat_code` | string | Special Category code  -  more granular than `desc_code` |
 | `sub_street_1/2/3` | string | Sub-street address levels (e.g. floor, unit, building) |
 | `case_number` | bigint | Appeal case number if applicable |
 | `current_from_date` | string | Date current rateable value took effect (DD-MON-YYYY) |
-| `postcode_area` | string | **Partition key** — leading letters of postcode, lowercase (e.g. `rg`, `sw`) |
+| `postcode_area` | string | **Partition key**  -  leading letters of postcode, lowercase (e.g. `rg`, `sw`) |
 
 Note: 1,054 rows have a null postcode; these are stored in the `unknown` partition.
 
 ## Partition scheme
 
-The table is partitioned by **postcode area** — the leading letter(s) of the postcode
+The table is partitioned by **postcode area**  -  the leading letter(s) of the postcode
 (e.g. `rg` for RG14, `sw` for SW1A). Always filter on `postcode_area` when querying
-a specific region — this avoids a full table scan across all 2.14M rows.
+a specific region  -  this avoids a full table scan across all 2.14M rows.
 
 ```sql
--- Good — partition filter pushes down to S3
+-- Good  -  partition filter pushes down to S3
 SELECT * FROM voa_rating_list_entries
 WHERE postcode_area = 'rg'
 
--- Bad — scans all partitions
+-- Bad  -  scans all partitions
 SELECT * FROM voa_rating_list_entries
 WHERE postcode LIKE 'RG%'
 ```
@@ -169,7 +169,7 @@ FROM os_open_uprn_uprn u
 JOIN os_code_point_open_codepo c
     ON c.eastings BETWEEN u.x_coordinate - 1 AND u.x_coordinate + 1
     AND c.northings BETWEEN u.y_coordinate - 1 AND u.y_coordinate + 1
--- (postcode join via Code Point is more practical — see note below)
+-- (postcode join via Code Point is more practical  -  see note below)
 
 UNION ALL
 
@@ -207,7 +207,7 @@ total AS (
 SELECT * FROM commercial
 ```
 
-The simplest practical query — commercial property count by town, joinable to other
+The simplest practical query  -  commercial property count by town, joinable to other
 data via postcode:
 
 ```sql

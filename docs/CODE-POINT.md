@@ -11,7 +11,7 @@ Updated quarterly by OS. No API key required.
 
 ## Coordinate system
 
-Coordinates are **OSGB36 / British National Grid (EPSG:27700)** — integer metres east and
+Coordinates are **OSGB36 / British National Grid (EPSG:27700)**  -  integer metres east and
 north of the BNG false origin. This is the same system used in `os_open_uprn`.
 
 To convert to WGS84 (latitude/longitude) in Athena you will need a projection library or
@@ -45,7 +45,7 @@ a pre-joined table; there is no built-in Athena function for OSGB→WGS84.
 | `admin_county_code` | string | Administrative county GSS code (may be empty) |
 | `admin_district_code` | string | Administrative district GSS code |
 | `admin_ward_code` | string | Administrative ward GSS code |
-| `postcode_area` | string | **Partition key** — two-letter area prefix, e.g. `sw` |
+| `postcode_area` | string | **Partition key**  -  two-letter area prefix, e.g. `sw` |
 
 ### Positional Quality Indicator (PQI)
 
@@ -66,7 +66,7 @@ a pre-joined table; there is no built-in Athena function for OSGB→WGS84.
 Data is split into 120 files, one per postcode area. The partition key `postcode_area` is the
 lowercase two-letter area prefix (e.g. `sw`, `ec`, `b`).
 
-Always filter on `postcode_area` when you know the area — it avoids a full table scan:
+Always filter on `postcode_area` when you know the area  -  it avoids a full table scan:
 
 ```sql
 WHERE postcode_area = 'sw'

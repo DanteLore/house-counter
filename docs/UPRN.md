@@ -1,6 +1,6 @@
 # OS Open UPRN
 
-Every addressable location in Great Britain has a Unique Property Reference Number (UPRN) — a
+Every addressable location in Great Britain has a Unique Property Reference Number (UPRN)  -  a
 persistent numeric identifier assigned by the local authority and maintained by Ordnance Survey.
 This dataset contains the UPRN and OSGB/WGS84 coordinates for all ~41.5 million locations,
 including residential and commercial properties and features without postal addresses.
@@ -25,13 +25,13 @@ location : s3://dantelore.data.incoming/os_open_uprn/uprn/
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `uprn` | bigint | Unique Property Reference Number — persistent identifier for the address |
+| `uprn` | bigint | Unique Property Reference Number  -  persistent identifier for the address |
 | `x_coordinate` | double | OSGB36 easting in metres (British National Grid) |
 | `y_coordinate` | double | OSGB36 northing in metres (British National Grid) |
 | `latitude` | double | WGS84 latitude (decimal degrees) |
 | `longitude` | double | WGS84 longitude (decimal degrees) |
-| `grid_e` | int | **Partition key** — 100km easting tile index: `floor(x_coordinate / 100000)` |
-| `grid_n` | int | **Partition key** — 100km northing tile index: `floor(y_coordinate / 100000)` |
+| `grid_e` | int | **Partition key**  -  100km easting tile index: `floor(x_coordinate / 100000)` |
+| `grid_n` | int | **Partition key**  -  100km northing tile index: `floor(y_coordinate / 100000)` |
 
 ---
 
@@ -45,7 +45,7 @@ grid_n = floor(y_coordinate / 100000)   -- 0 to 12 (south to north)
 ```
 
 There are 57 non-empty tiles across GB. Always filter on `grid_e` and/or `grid_n` in queries
-that cover a known geographic area — this tells Athena which S3 prefixes to scan and avoids
+that cover a known geographic area  -  this tells Athena which S3 prefixes to scan and avoids
 reading the full 41M-row dataset.
 
 ### Tile reference
@@ -100,7 +100,7 @@ WHERE grid_e = 5 AND grid_n = 1
   AND y_coordinate BETWEEN 178000 AND 182000
 ```
 
-**Count UPRNs per tile (full table scan — use sparingly):**
+**Count UPRNs per tile (full table scan  -  use sparingly):**
 ```sql
 SELECT grid_e, grid_n, COUNT(*) AS uprn_count
 FROM os_open_uprn_uprn

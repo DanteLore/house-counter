@@ -2,7 +2,7 @@
 
 ONS-defined polygon boundaries for 205 Counties and Unitary Authorities (CTYUAs) covering
 England, Wales and Scotland, April 2019 vintage (Ultra Generalised Clipped Boundaries).
-Area codes are stable and match current ONS codes — e.g. West Berkshire (`E06000037`),
+Area codes are stable and match current ONS codes  -  e.g. West Berkshire (`E06000037`),
 Cornwall (`E06000052`), Highland (`S12000017`). Boundaries are generalised (~20m tolerance)
 and suitable for spatial filtering, bbox lookups and display, not precise measurements.
 
@@ -29,7 +29,7 @@ urban form) are too granular.
 | `bbox_max_e` | int | Bounding rectangle max easting (OSGB metres) |
 | `bbox_max_n` | int | Bounding rectangle max northing (OSGB metres) |
 
-All coordinates are in metres for OSGB columns. WKT geometry strings can be large — avoid
+All coordinates are in metres for OSGB columns. WKT geometry strings can be large  -  avoid
 `SELECT *` over many rows.
 
 ## Common queries
@@ -62,7 +62,7 @@ WHERE centre_e BETWEEN 481000 AND 581000
 
 ### Aggregate house prices by CTYUA
 
-Join on area name — note that `town_city` in house price data won't always match a CTYUA
+Join on area name  -  note that `town_city` in house price data won't always match a CTYUA
 name. For accurate spatial joining, use the postcode → CTYUA lookup via OS Code Point Open
 (the `admin_district_code` field references the local authority, not CTYUA directly).
 
@@ -114,7 +114,7 @@ coordinates (Code Point Open, UPRN).
 
 ## Source and update cadence
 
-**Source:** ONS Open Geography Portal —
+**Source:** ONS Open Geography Portal  - 
 [CTYUA_Apr_2019_UGCB_Great_Britain_2022](https://services1.arcgis.com/ESMARspQHYMw9BZ9/ArcGIS/rest/services/CTYUA_Apr_2019_UGCB_Great_Britain_2022/FeatureServer/0)
 (Ultra Generalised Clipped Boundaries)
 

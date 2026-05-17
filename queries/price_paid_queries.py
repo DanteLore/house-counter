@@ -349,8 +349,8 @@ WHERE x_coordinate BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
 def fetch_price_stats_for_county(county_name):
     """Return yearly price stats for all sales within a CTYUA boundary.
 
-    Uses the OSGB boundary polygon + Code Point Open for spatial filtering —
-    the same approach as fetch_price_stats_for_polygon — so the result is
+    Uses the OSGB boundary polygon + Code Point Open for spatial filtering  - 
+    the same approach as fetch_price_stats_for_polygon  -  so the result is
     consistent with polygon-level stats and not affected by the unreliable
     free-text 'county' field in the PPD data.
     """

@@ -51,7 +51,7 @@ class TestFetchBuaAsGeojsonCoords:
         assert ring[0] == ring[-1]
 
     def test_coordinate_order_is_lon_lat(self):
-        # GeoJSON convention: [longitude, latitude] — not [lat, lon].
+        # GeoJSON convention: [longitude, latitude]  -  not [lat, lon].
         # Getting this wrong would place polygons in the wrong hemisphere.
         wkt = _wkt_polygon(-1.5, 51.0, -1.4, 51.1)
         with patch("queries.bua_queries.run_query", return_value=[{"geometry_wgs84_wkt": wkt}]):
@@ -81,7 +81,7 @@ class TestFetchBuaAsGeojsonCoords:
         assert lat_span > 0.3, "Should have returned the large polygon"
 
     def test_multipolygon_does_not_return_smallest_part(self):
-        # Three parts of different sizes — confirm the smallest is never returned.
+        # Three parts of different sizes  -  confirm the smallest is never returned.
         tiny   = (-1.51, 51.00, -1.50, 51.01)   # 0.01°
         medium = (-1.60, 51.00, -1.55, 51.05)   # 0.05°
         large  = (-1.90, 51.00, -1.40, 51.50)   # 0.5°
@@ -94,7 +94,7 @@ class TestFetchBuaAsGeojsonCoords:
         assert lon_span > 0.3
 
     def test_holes_are_discarded(self):
-        # A polygon with an interior ring (hole) — e.g. a park within a BUA.
+        # A polygon with an interior ring (hole)  -  e.g. a park within a BUA.
         # We only store the exterior; holes would complicate all downstream geometry.
         wkt = (
             "POLYGON ((-1.9 51.0, -1.4 51.0, -1.4 51.5, -1.9 51.5, -1.9 51.0), "

@@ -49,7 +49,7 @@ class TestAreaPrecision:
         assert area == pytest.approx(1_000_000, rel=1e-3), f"Got {area:.2f} m²"
 
     def test_1km_square_thatcham(self):
-        # Same shape at a different latitude — confirms the projection handles
+        # Same shape at a different latitude  -  confirms the projection handles
         # different parts of GB consistently.
         coords = _osgb_ring(
             (446000, 164000), (447000, 164000),
@@ -122,7 +122,7 @@ class TestAreaHectares:
             (530000, 180000), (531000, 180000),
             (531000, 181000), (530000, 181000),
         )
-        # Wait — this is 1000m × 1000m = 1,000,000 m² = 100 ha
+        # Wait  -  this is 1000m × 1000m = 1,000,000 m² = 100 ha
         assert PolygonAnalysis(coords).area_ha == pytest.approx(100.0, rel=1e-3)
 
     def test_area_ha_positive(self):

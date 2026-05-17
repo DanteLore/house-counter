@@ -80,7 +80,7 @@ class TestAggregateByYear:
         assert result[0]["mean_price"] == pytest.approx(200_000)
 
     def test_p25_less_than_median_less_than_p75(self):
-        # The percentile ordering is fundamental — if p25 > median a chart would look wrong.
+        # The percentile ordering is fundamental  -  if p25 > median a chart would look wrong.
         prices = [100_000, 150_000, 200_000, 250_000, 300_000, 350_000, 400_000, 450_000]
         result = ppq._aggregate_by_year({"2020": prices})
         r = result[0]
@@ -135,7 +135,7 @@ class TestFetchPriceStatsForPolygon:
         assert yearly[0]["count"] == 1
 
     def test_sale_outside_polygon_is_excluded(self):
-        # A postcode centroid in an adjacent area — Athena bbox passes it through
+        # A postcode centroid in an adjacent area  -  Athena bbox passes it through
         # but the Python polygon filter must catch it.
         yearly, all_prices = self._run([_sale("2020", 250_000, OUTSIDE_E, OUTSIDE_N)])
         assert yearly == []

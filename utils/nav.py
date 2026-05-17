@@ -21,4 +21,4 @@ def render_attributions():
     st.divider()
     st.caption("**Data sources**")
     for dataset, owner, licence in _ATTRIBUTIONS:
-        st.caption(f"- {dataset} © {owner} — {licence}")
+        st.caption(f"- {dataset} © {owner}  -  {licence}")
