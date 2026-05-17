@@ -13,7 +13,10 @@ import utils.nav as nav
 from queries.price_paid_queries import (
     fetch_price_stats_for_polygon,
     fetch_price_stats_national,
+    fetch_price_stats_for_county,
+    fetch_all_county_names,
     fetch_mix_for_polygon,
+    fetch_price_by_type_for_polygon,
     fetch_cpi_by_year,
     deflate_prices,
     real_stats_from_prices,
@@ -107,6 +110,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 
 NATIONAL_CACHE_FILE = "national_price_stats.json"
+COUNTY_CACHE_FILE   = "county_price_stats.json"
 
 
 def load_national_cache():
@@ -124,6 +128,23 @@ def save_national_cache(stats, cpi):
         json.dump({"stats": stats, "cpi": cpi}, f)
 
 
+def load_county_cache():
+    """Return {"names": [...], "stats": {county: [rows]}, "comparison": str} from disk, or defaults."""
+    if os.path.exists(COUNTY_CACHE_FILE):
+        with open(COUNTY_CACHE_FILE) as f:
+            data = json.load(f)
+        if isinstance(data, dict) and "names" in data:
+            return data
+        # Old format: bare dict of {county: stats} — migrate transparently
+        return {"names": None, "stats": data, "comparison": None}
+    return {"names": None, "stats": {}, "comparison": None}
+
+
+def save_county_cache(names, stats, comparison=None):
+    with open(COUNTY_CACHE_FILE, "w") as f:
+        json.dump({"names": names, "stats": stats, "comparison": comparison}, f)
+
+
 # ---------------------------------------------------------------------------
 # Session state — seed from disk on first load
 # ---------------------------------------------------------------------------
@@ -134,6 +155,17 @@ if "pp_national" not in st.session_state or "pp_cpi" not in st.session_state:
     cached = load_national_cache() or {}
     st.session_state.pp_national = cached.get("stats")
     st.session_state.pp_cpi      = cached.get("cpi")
+if "pp_county_cache" not in st.session_state:
+    _county_disk = load_county_cache()
+    st.session_state.pp_county_cache  = _county_disk["stats"]
+    st.session_state.pp_county_names  = _county_disk["names"]
+    st.session_state.pp_comparison_selection = (
+        _county_disk.get("comparison") or "National (England & Wales)"
+    )
+if "pp_comparison_selection" not in st.session_state:
+    st.session_state.pp_comparison_selection = (
+        load_county_cache().get("comparison") or "National (England & Wales)"
+    )
 
 for feat in polygons:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
@@ -142,9 +174,10 @@ for feat in polygons:
         stored_prices = feat["properties"].get("pp_prices")
         if stored_stats is not None:
             st.session_state.pp_results[poly_id] = {
-                "stats":  stored_stats,
-                "prices": [tuple(p) for p in (stored_prices or [])],
-                "mix":    feat["properties"].get("pp_mix", []),
+                "stats":         stored_stats,
+                "prices":        [tuple(p) for p in (stored_prices or [])],
+                "mix":           feat["properties"].get("pp_mix", []),
+                "price_by_type": feat["properties"].get("pp_price_by_type", []),
             }
 
 
@@ -160,12 +193,18 @@ def fetch_polygon_data(feat):
         poly_stats, all_prices = fetch_price_stats_for_polygon(coords)
     with st.spinner(f"Fetching property mix for {name}…"):
         mix = fetch_mix_for_polygon(coords)
-    st.session_state.pp_results[poly_id] = {"stats": poly_stats, "prices": all_prices, "mix": mix}
+    with st.spinner(f"Fetching price by type for {name}…"):
+        price_by_type = fetch_price_by_type_for_polygon(coords)
+    st.session_state.pp_results[poly_id] = {
+        "stats": poly_stats, "prices": all_prices,
+        "mix": mix, "price_by_type": price_by_type,
+    }
     for i, f in enumerate(polygons):
         if f["properties"].get("id", f["properties"].get("name")) == poly_id:
-            polygons[i]["properties"]["pp_stats"]  = poly_stats
-            polygons[i]["properties"]["pp_prices"] = [list(p) for p in all_prices]
-            polygons[i]["properties"]["pp_mix"]    = mix
+            polygons[i]["properties"]["pp_stats"]         = poly_stats
+            polygons[i]["properties"]["pp_prices"]        = [list(p) for p in all_prices]
+            polygons[i]["properties"]["pp_mix"]           = mix
+            polygons[i]["properties"]["pp_price_by_type"] = price_by_type
             break
     save_polygons(polygons)
 
@@ -177,6 +216,24 @@ def ensure_national_data():
         with st.spinner("Fetching CPI inflation data…"):
             st.session_state.pp_cpi = fetch_cpi_by_year()
         save_national_cache(st.session_state.pp_national, st.session_state.pp_cpi)
+
+
+def _current_comparison():
+    return st.session_state.get("pp_comparison_selection", "National (England & Wales)")
+
+
+def ensure_county_names():
+    if st.session_state.pp_county_names is None:
+        with st.spinner("Loading county list…"):
+            st.session_state.pp_county_names = fetch_all_county_names()
+        save_county_cache(st.session_state.pp_county_names, st.session_state.pp_county_cache, _current_comparison())
+
+
+def fetch_county_stats(county_name):
+    with st.spinner(f"Fetching price data for {county_name}…"):
+        stats = fetch_price_stats_for_county(county_name)
+    st.session_state.pp_county_cache[county_name] = stats
+    save_county_cache(st.session_state.pp_county_names, st.session_state.pp_county_cache, _current_comparison())
 
 
 with st.container():
@@ -202,6 +259,51 @@ with st.container():
             ensure_national_data()
             fetch_polygon_data(feat)
             st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Comparison baseline selector (national vs county)
+# ---------------------------------------------------------------------------
+
+st.markdown("**Comparison baseline**")
+ensure_county_names()
+county_names = st.session_state.pp_county_names or []
+
+c_sel, c_btn = st.columns([4, 1])
+with c_sel:
+    county_options = ["National (England & Wales)"] + county_names
+    # Ensure saved value is still valid (county list may have changed)
+    if st.session_state.pp_comparison_selection not in county_options:
+        st.session_state.pp_comparison_selection = "National (England & Wales)"
+
+    def _save_comparison():
+        save_county_cache(
+            st.session_state.pp_county_names,
+            st.session_state.pp_county_cache,
+            st.session_state.pp_comparison_selection,
+        )
+
+    comparison_choice = st.selectbox(
+        "Compare polygons against",
+        county_options,
+        key="pp_comparison_selection",
+        on_change=_save_comparison,
+    )
+
+selected_county = None if comparison_choice == "National (England & Wales)" else comparison_choice
+
+with c_btn:
+    st.markdown("&nbsp;", unsafe_allow_html=True)  # vertical align
+    if selected_county and selected_county not in st.session_state.pp_county_cache:
+        if st.button("Fetch", key="fetch_county", use_container_width=True):
+            fetch_county_stats(selected_county)
+            st.rerun()
+    elif selected_county:
+        if st.button("↺ Refresh", key="refresh_county", use_container_width=True):
+            fetch_county_stats(selected_county)
+            st.rerun()
+
+st.divider()
 
 
 # ---------------------------------------------------------------------------
@@ -241,20 +343,50 @@ def poly_stats(feat):
 def poly_mix(feat):
     return st.session_state.pp_results[poly_id(feat)].get("mix", [])
 
+def poly_price_by_type(feat):
+    return st.session_state.pp_results[poly_id(feat)].get("price_by_type", [])
+
 
 # ---------------------------------------------------------------------------
-# National data and year filtering
+# Comparison baseline and year filtering
 # ---------------------------------------------------------------------------
 
-national    = st.session_state.pp_national or []
-latest_year = max((r["year"] for r in national), default=None)
+national = st.session_state.pp_national or []
+
+# latest_year is the most recent year seen across ALL data sources — national,
+# county, and polygon stats — so that incomplete partial-year data is always
+# excluded regardless of which source was fetched most recently.
+_all_years_seen = (
+    [r["year"] for r in national]
+    + [r["year"] for r in (st.session_state.pp_county_cache.get(selected_county) or [])]
+    + [r["year"] for pid in st.session_state.pp_results
+       for r in st.session_state.pp_results[pid].get("stats", [])]
+)
+latest_year = max(_all_years_seen, default=None)
 
 def exclude_incomplete_year(rows):
     """Drop the latest year — it almost always has incomplete data."""
     return [r for r in rows if r["year"] != latest_year]
 
-national    = exclude_incomplete_year(national)
-national_by_year = {r["year"]: r for r in national}
+national = exclude_incomplete_year(national)
+
+# comparison / comparison_label: what we compare each polygon against.
+# Either national E&W stats, or a cached county's stats.
+if selected_county and selected_county in st.session_state.pp_county_cache:
+    comparison       = exclude_incomplete_year(st.session_state.pp_county_cache[selected_county])
+    comparison_label = selected_county
+else:
+    comparison       = national
+    comparison_label = "National"
+
+comparison_by_year = {r["year"]: r for r in comparison}
+
+
+def filter_other_type(rows):
+    """Drop 'O' (Other) property type rows when the global exclude_other toggle is on."""
+    if exclude_other:
+        return [r for r in rows if r.get("property_type") != "O"]
+    return rows
 
 
 def filter_to_year_range(rows, from_year=None, to_year=None):
@@ -290,14 +422,14 @@ def stats_in_real_terms(feat, adjust):
     return poly_stats(feat)
 
 
-def national_stats_in_real_terms(adjust):
-    """National stats deflated to current £.
+def comparison_stats_in_real_terms(adjust):
+    """Comparison baseline stats deflated to current £.
 
-    National data has no raw prices (it comes from Athena aggregates), so we
+    Comparison data has no raw prices (it comes from Athena aggregates), so we
     deflate the pre-computed stats directly. This is valid because CPI deflation
     is a linear per-year transform: deflate(median) == median(deflate(prices)).
     """
-    rows = st.session_state.pp_national or []
+    rows = comparison
     if not adjust:
         return rows
 
@@ -351,6 +483,28 @@ def year_range_selector(key_prefix):
     with c3:
         to_yr = st.selectbox("To year", all_years, index=len(all_years) - 1, key=f"{key_prefix}_to")
     return from_yr, to_yr
+
+
+# ---------------------------------------------------------------------------
+# Data table helper
+# ---------------------------------------------------------------------------
+
+def show_data_table(rows, label="Data"):
+    """Render rows (list of dicts) in a collapsed expander as a markdown table."""
+    if not rows:
+        return
+    with st.expander(f"📋 {label}"):
+        if not rows:
+            st.caption("No data.")
+            return
+        headers = list(rows[0].keys())
+        header_row = "| " + " | ".join(headers) + " |"
+        sep_row    = "| " + " | ".join("---" for _ in headers) + " |"
+        data_rows  = [
+            "| " + " | ".join(str(r.get(h, "")) for h in headers) + " |"
+            for r in rows
+        ]
+        st.markdown("\n".join([header_row, sep_row] + data_rows))
 
 
 # ---------------------------------------------------------------------------
@@ -477,19 +631,19 @@ def average_new_build_share(feat, from_year=None, to_year=None):
 
 
 def average_premium_vs_national(feat, from_year=None, to_year=None):
-    """Mean ratio of polygon median price to national median, across all years (%).
+    """Mean ratio of polygon median price to the comparison baseline median, across all years (%).
 
-    100 = at national median; 120 = 20% premium; 80 = 20% discount.
+    100 = at comparison median; 120 = 20% premium; 80 = 20% discount.
     Uses nominal prices for both sides so the ratio is consistent (CPI cancels within a year).
     """
     stats = _filtered_nominal_stats(feat, from_year, to_year)
     ratios = []
     for r in stats:
-        nat      = national_by_year.get(r["year"])
+        cmp_row  = comparison_by_year.get(r["year"])
         poly_med = _safe_float(r["median_price"])
-        nat_med  = _safe_float(nat["median_price"]) if nat else None
-        if poly_med and nat_med:
-            ratios.append(poly_med / nat_med * 100)
+        cmp_med  = _safe_float(cmp_row["median_price"]) if cmp_row else None
+        if poly_med and cmp_med:
+            ratios.append(poly_med / cmp_med * 100)
     return statistics.mean(ratios) if ratios else None
 
 
@@ -711,16 +865,16 @@ def median_trend_chart(from_year, to_year, adjust, nat_trend):
         fig.add_trace(go.Scatter(
             x=[r["year"] for r in nat_trend],
             y=[_safe_float(r["median_price"]) for r in nat_trend],
-            mode="lines", name="National",
+            mode="lines", name=comparison_label,
             line=dict(color="#888888", width=1, dash="dot"),
-            hovertemplate="%{x}: £%{y:,.0f}<extra>National</extra>",
+            hovertemplate="%{x}: £%{y:,.0f}<extra>" + comparison_label + "</extra>",
         ))
     fig.update_layout(**chart_layout(yaxis_title=price_axis_label(adjust), xaxis_title="Year"))
     return fig
 
 
 def premium_vs_national_chart():
-    nat_median_by_year = {r["year"]: _safe_float(r["median_price"]) for r in national}
+    cmp_median_by_year = {r["year"]: _safe_float(r["median_price"]) for r in comparison}
     fig = go.Figure()
     for feat in loaded:
         name  = poly_name(feat)
@@ -728,16 +882,17 @@ def premium_vs_national_chart():
         stats = filter_to_year_range(poly_stats(feat))
         years, vals = [], []
         for r in stats:
-            nat_val  = nat_median_by_year.get(r["year"])
+            cmp_val  = cmp_median_by_year.get(r["year"])
             poly_val = _safe_float(r["median_price"])
-            if nat_val and poly_val:
+            if cmp_val and poly_val:
                 years.append(r["year"])
-                vals.append(poly_val / nat_val * 100)
-        add_baseline_bars(fig, years, vals, name, color, baseline=100, hover_suffix="% of national")
+                vals.append(poly_val / cmp_val * 100)
+        add_baseline_bars(fig, years, vals, name, color, baseline=100,
+                          hover_suffix=f"% of {comparison_label} median")
     fig.add_hline(y=100, line_dash="dot", line_color="#888888",
-                  annotation_text="National", annotation_position="right")
+                  annotation_text=comparison_label, annotation_position="right")
     fig.update_layout(**chart_layout(
-        yaxis_title="Median price as % of national median",
+        yaxis_title=f"Median price as % of {comparison_label} median",
         xaxis_title="Year", barmode="group",
     ))
     return fig
@@ -760,16 +915,16 @@ def indexed_performance_chart(base_year):
             line=dict(color=color, width=2),
             hovertemplate="%{x}: %{y:.1f}<extra>" + name + "</extra>",
         ))
-    if national:
-        nat_by_yr = {r["year"]: r for r in national}
-        base_n    = _safe_float(nat_by_yr.get(base_year, {}).get("median_price"))
+    if comparison:
+        cmp_by_yr = {r["year"]: r for r in comparison}
+        base_n    = _safe_float(cmp_by_yr.get(base_year, {}).get("median_price"))
         if base_n:
-            ny = sorted(nat_by_yr)
-            ni = [(_safe_float(nat_by_yr[y]["median_price"]) or 0) / base_n * 100 for y in ny]
+            cy = sorted(cmp_by_yr)
+            ci = [(_safe_float(cmp_by_yr[y]["median_price"]) or 0) / base_n * 100 for y in cy]
             fig.add_trace(go.Scatter(
-                x=ny, y=ni, mode="lines", name="National",
+                x=cy, y=ci, mode="lines", name=comparison_label,
                 line=dict(color="#888888", width=1, dash="dot"),
-                hovertemplate="%{x}: %{y:.1f}<extra>National</extra>",
+                hovertemplate="%{x}: %{y:.1f}<extra>" + comparison_label + "</extra>",
             ))
     fig.add_hline(y=100, line_dash="dash", line_color="#cccccc")
     fig.update_layout(**chart_layout(yaxis_title=f"Index ({base_year} = 100)", xaxis_title="Year"))
@@ -795,9 +950,9 @@ def relative_growth_chart(base_year, nat_indexed_by_year):
                 vals.append((poly_val / base_val * 100) / nat_idx * 100)
         add_baseline_bars(fig, years, vals, name, color, baseline=100)
     fig.add_hline(y=100, line_dash="dot", line_color="#888888",
-                  annotation_text="National", annotation_position="right")
+                  annotation_text=comparison_label, annotation_position="right")
     fig.update_layout(**chart_layout(
-        yaxis_title=f"Growth relative to national ({base_year} = 100)",
+        yaxis_title=f"Growth relative to {comparison_label} ({base_year} = 100)",
         xaxis_title="Year", barmode="group",
     ))
     return fig
@@ -829,6 +984,50 @@ def mix_stacked_bar_chart(mix, dimension_key, labels, title):
     return fig
 
 
+def price_by_type_chart(feat, from_year, to_year, adjust):
+    """Median price trend per property type for a single polygon."""
+    rows = filter_to_year_range(poly_price_by_type(feat), from_year, to_year)
+    if not rows:
+        return None
+    types = sorted({r["property_type"] for r in rows})
+    TYPE_COLORS = {"D": "#1f77b4", "S": "#ff7f0e", "T": "#2ca02c", "F": "#d62728", "O": "#9467bd"}
+    fig = go.Figure()
+    for pt in types:
+        label = PROPERTY_TYPE_LABELS.get(pt, pt)
+        pt_rows = sorted([r for r in rows if r["property_type"] == pt], key=lambda r: r["year"])
+        if not pt_rows:
+            continue
+        years  = [r["year"] for r in pt_rows]
+        counts = [r["count"] for r in pt_rows]
+        if adjust and cpi:
+            medians = [deflate_prices([(r["year"], r["median_price"])], cpi, cpi_base_year)[0][1] for r in pt_rows]
+            p25s    = [deflate_prices([(r["year"], r["p25_price"])],    cpi, cpi_base_year)[0][1] for r in pt_rows]
+            p75s    = [deflate_prices([(r["year"], r["p75_price"])],    cpi, cpi_base_year)[0][1] for r in pt_rows]
+        else:
+            medians = [_safe_float(r["median_price"]) for r in pt_rows]
+            p25s    = [_safe_float(r["p25_price"])    for r in pt_rows]
+            p75s    = [_safe_float(r["p75_price"])    for r in pt_rows]
+        color = TYPE_COLORS.get(pt, "#888888")
+        fig.add_trace(go.Scatter(
+            x=years, y=p25s, mode="lines", name=label, legendgroup=label, showlegend=False,
+            line=dict(color=color, width=0),
+            hovertemplate="%{x}: £%{y:,.0f} (P25)<extra>" + label + "</extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=years, y=p75s, mode="lines", name=f"{label} (P25–P75)", legendgroup=label, showlegend=True,
+            fill="tonexty", fillcolor=hex_to_rgba(color, 0.15), line=dict(color=color, width=0),
+            hovertemplate="%{x}: £%{y:,.0f} (P75)<extra>" + label + "</extra>",
+        ))
+        fig.add_trace(go.Scatter(
+            x=years, y=medians, mode="lines+markers", name=label, legendgroup=label, showlegend=True,
+            line=dict(color=color, width=2),
+            customdata=counts,
+            hovertemplate="%{x}: £%{y:,.0f} median (%{customdata} sales)<extra>" + label + "</extra>",
+        ))
+    fig.update_layout(**chart_layout(yaxis_title=price_axis_label(adjust), xaxis_title="Year"))
+    return fig
+
+
 def turnover_chart():
     EW_DWELLING_STOCK = 25_000_000
     fig = go.Figure()
@@ -850,9 +1049,9 @@ def turnover_chart():
         ny   = [r["year"] for r in national]
         npct = [int(r["count"]) / EW_DWELLING_STOCK * 100 for r in national]
         fig.add_trace(go.Scatter(
-            x=ny, y=npct, mode="lines", name="National",
+            x=ny, y=npct, mode="lines", name="National (E&W)",
             line=dict(color="#888888", width=1, dash="dot"),
-            hovertemplate="%{x}: %{y:.2f}%<extra>National</extra>",
+            hovertemplate="%{x}: %{y:.2f}%<extra>National (E&W)</extra>",
         ))
     fig.update_layout(**chart_layout(xaxis_title="Year", yaxis_title="% of address stock sold"))
     fig.update_yaxes(tickformat=".1f", ticksuffix="%")
@@ -862,6 +1061,20 @@ def turnover_chart():
 # ===========================================================================
 # PAGE RENDERING
 # ===========================================================================
+
+if latest_year:
+    st.caption(
+        f"**Note:** {latest_year} data is excluded from all charts and calculations. "
+        f"Land Registry registration typically lags completions by 6–8 weeks, so the current year "
+        f"is always a partial sample — transaction counts are low and mix is unrepresentative. "
+        f"C (amendment) and D (deletion) records are processed; only A (addition) records for the "
+        f"current year accumulate slowly, making year-to-date figures unreliable for comparison."
+    )
+
+exclude_other = st.toggle(
+    "Exclude 'Other' property type (includes commercial sales, park homes, houseboats — not standard residential)",
+    key="exclude_other", value=True,
+)
 
 # ---------------------------------------------------------------------------
 # Market summary
@@ -1074,8 +1287,8 @@ if adj_trend:
     warn_if_cpi_missing()
 trend_from, trend_to = year_range_selector("trend")
 
-nat_trend        = filter_to_year_range(national_stats_in_real_terms(adj_trend), trend_from, trend_to)
-nat_trend_by_year = {r["year"]: r for r in nat_trend}
+cmp_trend        = filter_to_year_range(comparison_stats_in_real_terms(adj_trend), trend_from, trend_to)
+cmp_trend_by_year = {r["year"]: r for r in cmp_trend}
 
 narrative_parts = []
 for feat in loaded:
@@ -1085,14 +1298,14 @@ for feat in loaded:
         continue
     latest        = stats[-1]
     latest_median = _safe_float(latest["median_price"])
-    nat_row       = nat_trend_by_year.get(latest["year"])
-    nat_median    = _safe_float(nat_row["median_price"]) if nat_row else None
-    if latest_median and nat_median:
-        pct       = (latest_median / nat_median - 1) * 100
+    cmp_row       = cmp_trend_by_year.get(latest["year"])
+    cmp_median    = _safe_float(cmp_row["median_price"]) if cmp_row else None
+    if latest_median and cmp_median:
+        pct       = (latest_median / cmp_median - 1) * 100
         direction = "above" if pct >= 0 else "below"
         narrative_parts.append(
             f"**{name}** had a median sale price of **£{latest_median:,.0f}** in {latest['year']}, "
-            f"{abs(pct):.0f}% {direction} the national median of £{nat_median:,.0f}."
+            f"{abs(pct):.0f}% {direction} the {comparison_label} median of £{cmp_median:,.0f}."
         )
 
 inflation_note = f" Prices adjusted to {cpi_base_year} £ using annual average CPI." if adj_trend else ""
@@ -1100,17 +1313,62 @@ st.markdown(
     "Median sale price per year for each selected area alongside the national median (dotted line)."
     + inflation_note + " " + " ".join(narrative_parts)
 )
-st.plotly_chart(median_trend_chart(trend_from, trend_to, adj_trend, nat_trend), width="stretch")
+st.plotly_chart(median_trend_chart(trend_from, trend_to, adj_trend, cmp_trend), width="stretch")
 
-if national:
+# Data table: one row per year per polygon + comparison baseline
+trend_table_rows = []
+for feat in loaded:
+    name  = poly_name(feat)
+    stats = filter_to_year_range(stats_in_real_terms(feat, adj_trend), trend_from, trend_to)
+    for r in stats:
+        trend_table_rows.append({
+            "Area": name,
+            "Year": r["year"],
+            "Median": f"£{_safe_float(r['median_price']):,.0f}",
+            "P25":    f"£{_safe_float(r['p25_price']):,.0f}",
+            "P75":    f"£{_safe_float(r['p75_price']):,.0f}",
+            "Sales":  r["count"],
+        })
+for r in cmp_trend:
+    trend_table_rows.append({
+        "Area": comparison_label,
+        "Year": r["year"],
+        "Median": f"£{_safe_float(r['median_price']):,.0f}",
+        "P25":    f"£{_safe_float(r['p25_price']):,.0f}",
+        "P75":    f"£{_safe_float(r['p75_price']):,.0f}",
+        "Sales":  r.get("count", "—"),
+    })
+show_data_table(sorted(trend_table_rows, key=lambda r: (r["Year"], r["Area"])), "Median price data")
+
+if comparison:
     st.markdown(
-        "The chart below shows the same data normalised to the national median each year — "
-        "so the national line is always 100 and each area's value shows its percentage premium "
-        "or discount relative to the country as a whole. "
-        "A rising line means the area is becoming *more* expensive relative to the rest of England & Wales; "
-        "a falling line means it is becoming *cheaper* in relative terms."
+        f"The chart below shows the same data normalised to the {comparison_label} median each year — "
+        f"so the {comparison_label} line is always 100 and each area's value shows its percentage premium "
+        f"or discount relative to {comparison_label}. "
+        "A rising line means the area is becoming *more* expensive in relative terms; "
+        "a falling line means it is becoming *cheaper*."
     )
     st.plotly_chart(premium_vs_national_chart(), width="stretch")
+
+    # Data table: premium % by year per polygon
+    cmp_med_by_yr = {r["year"]: _safe_float(r["median_price"]) for r in comparison}
+    premium_rows = []
+    for feat in loaded:
+        name  = poly_name(feat)
+        stats = filter_to_year_range(poly_stats(feat), trend_from, trend_to)
+        for r in stats:
+            cmp_val  = cmp_med_by_yr.get(r["year"])
+            poly_val = _safe_float(r["median_price"])
+            if cmp_val and poly_val:
+                premium_rows.append({
+                    "Area": name,
+                    "Year": r["year"],
+                    "Polygon median": f"£{poly_val:,.0f}",
+                    f"{comparison_label} median": f"£{cmp_val:,.0f}",
+                    f"% of {comparison_label}": f"{poly_val / cmp_val * 100:.1f}%",
+                })
+    show_data_table(sorted(premium_rows, key=lambda r: (r["Year"], r["Area"])),
+                    f"Premium vs {comparison_label}")
 
 st.divider()
 
@@ -1122,8 +1380,8 @@ st.divider()
 st.subheader("Relative price performance")
 
 all_year_sets = [{r["year"] for r in poly_stats(f)} for f in loaded]
-if national:
-    all_year_sets.append({r["year"] for r in national})
+if comparison:
+    all_year_sets.append({r["year"] for r in comparison})
 common_years = sorted(set.intersection(*all_year_sets)) if all_year_sets else []
 base_year    = common_years[0] if common_years else None
 
@@ -1135,17 +1393,17 @@ if base_year:
         by_yr  = {r["year"]: r for r in stats}
         base_val   = _safe_float(by_yr.get(base_year, {}).get("median_price"))
         latest_val = _safe_float(stats[-1]["median_price"]) if stats else None
-        nat_base   = _safe_float(national_by_year.get(base_year, {}).get("median_price"))
-        nat_latest = _safe_float(national_by_year.get(stats[-1]["year"] if stats else "", {}).get("median_price"))
-        if base_val and latest_val and nat_base and nat_latest:
-            growth       = (latest_val / base_val - 1) * 100
-            nat_growth   = (nat_latest / nat_base - 1) * 100
-            diff         = growth - nat_growth
+        cmp_base   = _safe_float(comparison_by_year.get(base_year, {}).get("median_price"))
+        cmp_latest = _safe_float(comparison_by_year.get(stats[-1]["year"] if stats else "", {}).get("median_price"))
+        if base_val and latest_val and cmp_base and cmp_latest:
+            growth        = (latest_val / base_val - 1) * 100
+            cmp_growth    = (cmp_latest / cmp_base - 1) * 100
+            diff          = growth - cmp_growth
             faster_slower = "faster" if diff >= 0 else "slower"
             index_narrative_parts.append(
                 f"**{name}** has grown **{growth:.0f}%** since {base_year}, "
                 f"{abs(diff):.0f} percentage points {faster_slower} than "
-                f"the national average of {nat_growth:.0f}%."
+                f"the {comparison_label} average of {cmp_growth:.0f}%."
             )
 
 st.markdown(
@@ -1158,21 +1416,68 @@ st.markdown(
 if base_year:
     st.plotly_chart(indexed_performance_chart(base_year), width="stretch")
 
-    if national:
-        nat_by_yr  = {r["year"]: r for r in national}
-        base_n     = _safe_float(nat_by_yr.get(base_year, {}).get("median_price"))
+    # Data table: index value per year per polygon + comparison
+    index_rows = []
+    for feat in loaded:
+        name  = poly_name(feat)
+        stats = filter_to_year_range(poly_stats(feat))
+        by_yr = {r["year"]: r for r in stats}
+        base_val = _safe_float(by_yr.get(base_year, {}).get("median_price"))
+        if not base_val:
+            continue
+        for y in sorted(by_yr):
+            val = _safe_float(by_yr[y]["median_price"])
+            if val:
+                index_rows.append({"Area": name, "Year": y,
+                                   "Median": f"£{val:,.0f}",
+                                   f"Index ({base_year}=100)": f"{val / base_val * 100:.1f}"})
+    if comparison:
+        cmp_by_yr = {r["year"]: r for r in comparison}
+        base_n    = _safe_float(cmp_by_yr.get(base_year, {}).get("median_price"))
         if base_n:
-            nat_indexed_by_year = {
-                y: (_safe_float(nat_by_yr[y]["median_price"]) or 0) / base_n * 100
-                for y in nat_by_yr
+            for y in sorted(cmp_by_yr):
+                val = _safe_float(cmp_by_yr[y]["median_price"])
+                if val:
+                    index_rows.append({"Area": comparison_label, "Year": y,
+                                       "Median": f"£{val:,.0f}",
+                                       f"Index ({base_year}=100)": f"{val / base_n * 100:.1f}"})
+    show_data_table(sorted(index_rows, key=lambda r: (r["Year"], r["Area"])),
+                    f"Indexed prices ({base_year} = 100)")
+
+    if comparison:
+        cmp_by_yr = {r["year"]: r for r in comparison}
+        base_n    = _safe_float(cmp_by_yr.get(base_year, {}).get("median_price"))
+        if base_n:
+            cmp_indexed_by_year = {
+                y: (_safe_float(cmp_by_yr[y]["median_price"]) or 0) / base_n * 100
+                for y in cmp_by_yr
             }
             st.markdown(
-                f"The same indexed data with the national growth line clamped to 100 each year. "
-                f"A value above 100 means prices have grown *faster* than the national average since {base_year}; "
-                f"below 100 means slower. This removes the national trend so you can focus purely on "
-                f"whether each area is outpacing or lagging the country."
+                f"The same indexed data with the {comparison_label} growth line clamped to 100 each year. "
+                f"A value above 100 means prices have grown *faster* than {comparison_label} since {base_year}; "
+                f"below 100 means slower."
             )
-            st.plotly_chart(relative_growth_chart(base_year, nat_indexed_by_year), width="stretch")
+            st.plotly_chart(relative_growth_chart(base_year, cmp_indexed_by_year), width="stretch")
+
+            # Data table: relative growth index per year per polygon
+            rel_rows = []
+            for feat in loaded:
+                name  = poly_name(feat)
+                stats = filter_to_year_range(poly_stats(feat))
+                by_yr = {r["year"]: r for r in stats}
+                base_val = _safe_float(by_yr.get(base_year, {}).get("median_price"))
+                if not base_val:
+                    continue
+                for y in sorted(by_yr):
+                    cmp_idx  = cmp_indexed_by_year.get(y)
+                    poly_val = _safe_float(by_yr[y]["median_price"])
+                    if cmp_idx and poly_val:
+                        rel_rows.append({
+                            "Area": name, "Year": y,
+                            f"Relative to {comparison_label}": f"{(poly_val / base_val * 100) / cmp_idx * 100:.1f}",
+                        })
+            show_data_table(sorted(rel_rows, key=lambda r: (r["Year"], r["Area"])),
+                            f"Growth relative to {comparison_label}")
 else:
     st.caption("Not enough overlapping data to build an index chart.")
 
@@ -1203,15 +1508,119 @@ for feat in loaded:
         continue
     st.markdown(f"**{name}**")
     col1, col2, col3 = st.columns(3)
-    col1.plotly_chart(mix_stacked_bar_chart(mix, "property_type", PROPERTY_TYPE_LABELS, "Property type"), width="stretch")
+    pt_labels = {k: v for k, v in PROPERTY_TYPE_LABELS.items() if not (exclude_other and k == "O")}
+    col1.plotly_chart(mix_stacked_bar_chart(mix, "property_type", pt_labels, "Property type"), width="stretch")
     col2.plotly_chart(mix_stacked_bar_chart(mix, "duration",      DURATION_LABELS,      "Tenure"),        width="stretch")
     col3.plotly_chart(mix_stacked_bar_chart(mix, "old_new",       OLD_NEW_LABELS,       "New / established"), width="stretch")
+
+    # Data table: raw mix counts by year
+    mix_rows = []
+    years_set = sorted({r["year"] for r in mix})
+    for year in years_set:
+        year_rows = [r for r in mix if r["year"] == year]
+        total = sum(r["count"] for r in year_rows)
+        by_type = {}
+        for r in year_rows:
+            pt = PROPERTY_TYPE_LABELS.get(r.get("property_type"), r.get("property_type", "?"))
+            by_type[pt] = by_type.get(pt, 0) + r["count"]
+        new_builds = sum(r["count"] for r in year_rows if r.get("old_new") == "Y")
+        row = {"Year": year, "Total sales": total,
+               "New build %": f"{new_builds / total * 100:.1f}%" if total else "—"}
+        for code, label in PROPERTY_TYPE_LABELS.items():
+            if exclude_other and code == "O":
+                continue
+            cnt = by_type.get(label, 0)
+            row[label] = f"{cnt / total * 100:.1f}%" if total else "—"
+        mix_rows.append(row)
+    show_data_table(mix_rows, f"{name} — property mix")
 
 st.divider()
 
 
 # ---------------------------------------------------------------------------
-# Section 6: Annual turnover
+# Section 6: Price by property type
+# ---------------------------------------------------------------------------
+
+st.subheader("Price by property type")
+adj_type = st.toggle("Adjust for inflation (current £)", key="adj_type", value=False)
+if adj_type:
+    warn_if_cpi_missing()
+type_from, type_to = year_range_selector("type")
+
+st.markdown(
+    "Median sale price over time, split by property type. "
+    "This separates the mix effect from genuine price movements — "
+    "if flats become a larger share of sales, the overall median can fall even if every property type is rising. "
+    "The shaded band shows the P25–P75 range (middle 50% of sales for that type in that year)."
+)
+
+any_type_data = False
+for feat in loaded:
+    name = poly_name(feat)
+    pbt  = filter_other_type(filter_to_year_range(poly_price_by_type(feat), type_from, type_to))
+    if not pbt:
+        need_fetch = not poly_price_by_type(feat)
+        msg = f"No price-by-type data for **{name}** — {'re-fetch to load' if need_fetch else 'no data in range'}."
+        st.caption(msg)
+        continue
+    any_type_data = True
+    st.markdown(f"**{name}**")
+
+    # Cross-type narrative — use most recent complete year (latest_year already excluded from pbt)
+    types_in_data = sorted({r["property_type"] for r in pbt if r["property_type"] in ("D", "S", "T", "F")})
+    latest_yr = max((r["year"] for r in pbt), default=None)
+    if not latest_yr:
+        continue
+    latest_by_type = {}
+    for r in pbt:
+        if r["year"] == latest_yr and r["property_type"] in types_in_data:
+            latest_by_type[r["property_type"]] = r
+    if latest_by_type:
+        sorted_by_median = sorted(latest_by_type.items(), key=lambda kv: kv[1]["median_price"], reverse=True)
+        parts = [
+            f"{PROPERTY_TYPE_LABELS.get(pt, pt)}: £{row['median_price']:,.0f} ({row['count']} sales)"
+            for pt, row in sorted_by_median
+        ]
+        st.caption(f"Median prices in {latest_yr}: " + " · ".join(parts))
+
+        # Flat vs house commentary
+        det_row  = latest_by_type.get("D")
+        flat_row = latest_by_type.get("F")
+        if det_row and flat_row:
+            ratio = det_row["median_price"] / flat_row["median_price"]
+            st.caption(
+                f"Detached homes sell for **{ratio:.1f}×** the median flat price in {latest_yr}. "
+                f"Years with more detached sales (and fewer flats) will have a higher overall median, "
+                f"even if no individual type has changed."
+            )
+
+    fig = price_by_type_chart(feat, type_from, type_to, adj_type)
+    if fig:
+        st.plotly_chart(fig, width="stretch")
+
+    # Data table: median, count, P25, P75 per type per year
+    pbt_rows = []
+    for r in sorted(pbt, key=lambda r: (r["year"], r["property_type"])):
+        if r["year"] == latest_year:
+            continue
+        pbt_rows.append({
+            "Year":  r["year"],
+            "Type":  PROPERTY_TYPE_LABELS.get(r["property_type"], r["property_type"]),
+            "Sales": r["count"],
+            "Median": f"£{r['median_price']:,.0f}",
+            "P25":    f"£{r['p25_price']:,.0f}",
+            "P75":    f"£{r['p75_price']:,.0f}",
+        })
+    show_data_table(pbt_rows, f"{name} — price by type")
+
+if not any_type_data:
+    st.caption("Re-fetch polygon data to load price-by-type breakdown.")
+
+st.divider()
+
+
+# ---------------------------------------------------------------------------
+# Section 7: Annual turnover
 # ---------------------------------------------------------------------------
 
 EW_DWELLING_STOCK = 25_000_000
@@ -1244,5 +1653,29 @@ st.markdown(
     + " ".join(turnover_notes)
 )
 st.plotly_chart(turnover_chart(), width="stretch")
+
+turnover_rows = []
+for feat in loaded:
+    uprn_count = poly_uprn_count(feat)
+    if not uprn_count:
+        continue
+    name  = poly_name(feat)
+    stats = filter_to_year_range(poly_stats(feat))
+    for r in stats:
+        pct = int(r["count"]) / uprn_count * 100
+        turnover_rows.append({"Area": name, "Year": r["year"],
+                               "Sales": r["count"],
+                               "Addresses": f"{uprn_count:,}",
+                               "Turnover %": f"{pct:.2f}%"})
+if national:
+    for r in national:
+        if r["year"] == latest_year:
+            continue
+        pct = int(r["count"]) / EW_DWELLING_STOCK * 100
+        turnover_rows.append({"Area": "National (E&W)", "Year": r["year"],
+                               "Sales": r["count"],
+                               "Addresses": f"{EW_DWELLING_STOCK:,}",
+                               "Turnover %": f"{pct:.2f}%"})
+show_data_table(sorted(turnover_rows, key=lambda r: (r["Year"], r["Area"])), "Annual turnover data")
 
 nav.render_attributions()

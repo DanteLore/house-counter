@@ -1,12 +1,14 @@
 import statistics
 
+from shapely import wkt as shapely_wkt
 from shapely.geometry import Point
 
 from queries.athena import run_query, ATHENA_DB
 from utils.geo import polygon_osgb
 
-PPD_TABLE = "house_prices_ppd"
+PPD_TABLE      = "house_prices_ppd"
 CODEPOINT_TABLE = "os_code_point_open_codepo"
+CTYUA_TABLE    = "ons_ctyua_boundaries_ctyua"
 
 
 def _postcode_areas_for_polygon(geojson_coords):
@@ -156,6 +158,68 @@ WHERE p.record_status != 'D'
     ]
 
 
+def fetch_price_by_type_for_polygon(geojson_coords):
+    """
+    Return yearly median prices broken down by property type for sales within the polygon.
+
+    Returns a list of dicts: {year, property_type, median_price, count}
+    """
+    poly = polygon_osgb(geojson_coords)
+    bounds = poly.bounds
+    postcode_areas = _postcode_areas_for_polygon(geojson_coords)
+
+    if not postcode_areas:
+        return []
+
+    area_list = ", ".join(f"'{a}'" for a in postcode_areas)
+
+    sql = f"""
+SELECT
+    p.year,
+    p.property_type,
+    CAST(p.price AS double) AS price,
+    c.eastings,
+    c.northings
+FROM {ATHENA_DB}.{PPD_TABLE} p
+JOIN {ATHENA_DB}.{CODEPOINT_TABLE} c
+  ON c.postcode = p.postcode
+ AND c.postcode_area = LOWER(REGEXP_EXTRACT(p.postcode, '^([A-Z]{{1,2}})', 1))
+WHERE p.record_status != 'D'
+  AND c.postcode_area IN ({area_list})
+  AND c.eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
+  AND c.northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
+""".strip()
+
+    records = run_query(sql)
+
+    by_key = {}  # (year, property_type) -> [price, ...]
+    for r in records:
+        try:
+            e     = float(r["eastings"])
+            n     = float(r["northings"])
+            price = float(r["price"])
+        except (ValueError, KeyError):
+            continue
+        if not poly.contains(Point(e, n)):
+            continue
+        key = (r["year"], r["property_type"])
+        by_key.setdefault(key, []).append(price)
+
+    result = []
+    for (year, pt), prices in sorted(by_key.items()):
+        prices_sorted = sorted(prices)
+        n = len(prices_sorted)
+        result.append({
+            "year":          year,
+            "property_type": pt,
+            "count":         n,
+            "median_price":  statistics.median(prices_sorted),
+            "p25_price":     prices_sorted[max(0, int(n * 0.25) - 1)],
+            "p75_price":     prices_sorted[min(n - 1, int(n * 0.75))],
+        })
+    return result
+
+
 _CPI_BASE = 100.0  # CPI index is normalised to 2015 = 100
 
 
@@ -217,6 +281,100 @@ ORDER BY year
 """.strip()
     rows = run_query(sql)
     return {str(int(r["year"])): float(r["avg_cpi"]) for r in rows if r.get("avg_cpi")}
+
+
+def fetch_all_county_names():
+    """Return a sorted list of all CTYUA names available in the boundaries table."""
+    sql = f"""
+SELECT ctyua25nm
+FROM {ATHENA_DB}.{CTYUA_TABLE}
+ORDER BY ctyua25nm
+""".strip()
+    rows = run_query(sql)
+    return [r["ctyua25nm"] for r in rows if r.get("ctyua25nm")]
+
+
+def _fetch_ctyua_boundary(county_name):
+    """Return (shapely_polygon, bounds) for a named CTYUA, or (None, None) if not found.
+
+    Uses the OSGB geometry so coordinates are in metres, matching Code Point Open.
+    """
+    sql = f"""
+SELECT geometry_osgb_wkt, bbox_min_e, bbox_min_n, bbox_max_e, bbox_max_n
+FROM {ATHENA_DB}.{CTYUA_TABLE}
+WHERE ctyua25nm = '{county_name}'
+LIMIT 1
+""".strip()
+    rows = run_query(sql)
+    if not rows:
+        return None, None
+    row  = rows[0]
+    poly = shapely_wkt.loads(row["geometry_osgb_wkt"])
+    bounds = (
+        float(row["bbox_min_e"]), float(row["bbox_min_n"]),
+        float(row["bbox_max_e"]), float(row["bbox_max_n"]),
+    )
+    return poly, bounds
+
+
+def fetch_price_stats_for_county(county_name):
+    """Return yearly price stats for all sales within a CTYUA boundary.
+
+    Uses the OSGB boundary polygon + Code Point Open for spatial filtering —
+    the same approach as fetch_price_stats_for_polygon — so the result is
+    consistent with polygon-level stats and not affected by the unreliable
+    free-text 'county' field in the PPD data.
+    """
+    poly, bounds = _fetch_ctyua_boundary(county_name)
+    if poly is None:
+        return []
+
+    # Postcode area prefixes overlapping the bbox, to narrow the Code Point scan
+    sql_areas = f"""
+SELECT DISTINCT postcode_area
+FROM {ATHENA_DB}.{CODEPOINT_TABLE}
+WHERE eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
+  AND northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
+""".strip()
+    area_rows = run_query(sql_areas)
+    postcode_areas = {r["postcode_area"] for r in area_rows if r.get("postcode_area")}
+    if not postcode_areas:
+        return []
+
+    area_list = ", ".join(f"'{a}'" for a in postcode_areas)
+
+    sql = f"""
+SELECT
+    p.year,
+    CAST(p.price AS double) AS price,
+    c.eastings,
+    c.northings
+FROM {ATHENA_DB}.{PPD_TABLE} p
+JOIN {ATHENA_DB}.{CODEPOINT_TABLE} c
+  ON c.postcode = p.postcode
+ AND c.postcode_area = LOWER(REGEXP_EXTRACT(p.postcode, '^([A-Z]{{1,2}})', 1))
+WHERE p.record_status != 'D'
+  AND p.ppd_category_type = 'A'
+  AND c.postcode_area IN ({area_list})
+  AND c.eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
+  AND c.northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
+""".strip()
+
+    records = run_query(sql)
+
+    by_year = {}
+    for r in records:
+        try:
+            e     = float(r["eastings"])
+            n     = float(r["northings"])
+            price = float(r["price"])
+        except (ValueError, KeyError):
+            continue
+        if not poly.contains(Point(e, n)):
+            continue
+        by_year.setdefault(r["year"], []).append(price)
+
+    return _aggregate_by_year(by_year)
 
 
 def fetch_price_stats_national():
