@@ -13,6 +13,7 @@ import utils.nav as nav
 from queries.price_paid_queries import (
     fetch_price_stats_for_polygon,
     fetch_price_stats_national,
+    fetch_mix_for_polygon,
 )
 from utils.polygons import DEFAULT_COLOR, load_polygons, save_polygons
 
@@ -146,11 +147,11 @@ for feat in polygons:
         stored_stats = feat["properties"].get("pp_stats")
         stored_prices = feat["properties"].get("pp_prices")
         if stored_stats is not None:
-            # pp_prices is stored as [[year, price], ...] — convert back to tuples
             prices_tuples = [tuple(p) for p in (stored_prices or [])]
             st.session_state.pp_results[poly_id] = {
                 "stats": stored_stats,
                 "prices": prices_tuples,
+                "mix": feat["properties"].get("pp_mix", []),
             }
 
 
@@ -164,12 +165,14 @@ def _fetch_polygon(feat):
     coords = feat["geometry"]["coordinates"]
     with st.spinner(f"Fetching prices for {name}…"):
         poly_stats, all_prices = fetch_price_stats_for_polygon(coords)
-    st.session_state.pp_results[poly_id] = {"stats": poly_stats, "prices": all_prices}
-    # Persist to polygons.geojson — prices stored as lists (JSON-serialisable)
+    with st.spinner(f"Fetching property mix for {name}…"):
+        mix = fetch_mix_for_polygon(coords)
+    st.session_state.pp_results[poly_id] = {"stats": poly_stats, "prices": all_prices, "mix": mix}
     for i, f in enumerate(polygons):
         if f["properties"].get("id", f["properties"].get("name")) == poly_id:
             polygons[i]["properties"]["pp_stats"] = poly_stats
             polygons[i]["properties"]["pp_prices"] = [list(p) for p in all_prices]
+            polygons[i]["properties"]["pp_mix"] = mix
             break
     save_polygons(polygons)
 
@@ -701,7 +704,74 @@ st.divider()
 
 
 # ---------------------------------------------------------------------------
-# Section 4: Turnover
+# Section 4: Property mix
+# ---------------------------------------------------------------------------
+
+PROPERTY_TYPE_LABELS = {"D": "Detached", "S": "Semi-detached", "T": "Terraced", "F": "Flat", "O": "Other"}
+DURATION_LABELS      = {"F": "Freehold", "L": "Leasehold", "U": "Unknown"}
+OLD_NEW_LABELS       = {"Y": "New build", "N": "Established"}
+
+st.subheader("Property mix")
+st.markdown(
+    "Breakdown of sales by property type, tenure, and new/established build — "
+    "shown as a percentage of all sales in each year. "
+    "Shifts over time reflect new development, estate regeneration, or changing demand."
+)
+
+for feat in loaded:
+    poly_id = feat["properties"].get("id", feat["properties"].get("name"))
+    name    = feat["properties"].get("name", poly_id)
+    mix     = st.session_state.pp_results[poly_id].get("mix", [])
+
+    if not mix:
+        st.caption(f"No mix data for {name} — re-fetch to load.")
+        continue
+
+    st.markdown(f"**{name}**")
+
+    # Build {year: {category: count}} for each dimension
+    def _mix_chart(mix, key, labels, title):
+        years_set = sorted({r["year"] for r in mix})
+        totals = {}
+        by_cat = {}
+        for r in mix:
+            y, cat, cnt = r["year"], r.get(key, "?"), r["count"]
+            totals[y] = totals.get(y, 0) + cnt
+            by_cat.setdefault(cat, {})[y] = by_cat.get(cat, {}).get(y, 0) + cnt
+
+        fig = go.Figure()
+        for code, label in labels.items():
+            pcts = [
+                by_cat.get(code, {}).get(y, 0) / totals[y] * 100
+                if totals.get(y) else 0
+                for y in years_set
+            ]
+            fig.add_trace(go.Bar(
+                x=years_set, y=pcts, name=label,
+                hovertemplate="%{x}: %{y:.1f}%<extra>" + label + "</extra>",
+            ))
+        fig.update_layout(
+            barmode="stack",
+            title=title,
+            yaxis=dict(ticksuffix="%", range=[0, 100]),
+            xaxis_title="Year",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=40, b=40),
+            hovermode="x unified",
+            height=300,
+        )
+        return fig
+
+    col1, col2, col3 = st.columns(3)
+    col1.plotly_chart(_mix_chart(mix, "property_type", PROPERTY_TYPE_LABELS, "Property type"), width="stretch")
+    col2.plotly_chart(_mix_chart(mix, "duration",      DURATION_LABELS,      "Tenure"),        width="stretch")
+    col3.plotly_chart(_mix_chart(mix, "old_new",       OLD_NEW_LABELS,       "New / established"), width="stretch")
+
+st.divider()
+
+
+# ---------------------------------------------------------------------------
+# Section 5: Turnover
 # ---------------------------------------------------------------------------
 
 st.subheader("Annual turnover")

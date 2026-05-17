@@ -98,6 +98,62 @@ WHERE p.record_status != 'D'
     return _aggregate_by_year(by_year), all_prices
 
 
+def fetch_mix_for_polygon(geojson_coords):
+    """
+    Return yearly counts broken down by property_type, duration, and old_new
+    for sales within the polygon.
+
+    Returns a list of dicts:
+      {year, property_type, duration, old_new, count}
+    """
+    poly = polygon_osgb(geojson_coords)
+    bounds = poly.bounds
+    postcode_areas = _postcode_areas_for_polygon(geojson_coords)
+
+    if not postcode_areas:
+        return []
+
+    area_list = ", ".join(f"'{a}'" for a in postcode_areas)
+
+    sql = f"""
+SELECT
+    p.year,
+    p.property_type,
+    p.duration,
+    p.old_new,
+    c.eastings,
+    c.northings
+FROM {ATHENA_DB}.{PPD_TABLE} p
+JOIN {ATHENA_DB}.{CODEPOINT_TABLE} c
+  ON c.postcode = p.postcode
+ AND c.postcode_area = LOWER(REGEXP_EXTRACT(p.postcode, '^([A-Z]{{1,2}})', 1))
+WHERE p.record_status != 'D'
+  AND c.postcode_area IN ({area_list})
+  AND c.eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
+  AND c.northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
+""".strip()
+
+    records = run_query(sql)
+
+    # Exact point-in-polygon filter then aggregate
+    by_key = {}
+    for r in records:
+        try:
+            e = float(r["eastings"])
+            n = float(r["northings"])
+        except (ValueError, KeyError):
+            continue
+        if not poly.contains(Point(e, n)):
+            continue
+        key = (r["year"], r["property_type"], r["duration"], r["old_new"])
+        by_key[key] = by_key.get(key, 0) + 1
+
+    return [
+        {"year": y, "property_type": pt, "duration": dur, "old_new": on, "count": cnt}
+        for (y, pt, dur, on), cnt in sorted(by_key.items())
+    ]
+
+
 def fetch_price_stats_national():
     """Return yearly price stats aggregated across all of England & Wales."""
     sql = f"""
