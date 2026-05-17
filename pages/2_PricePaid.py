@@ -1,3 +1,5 @@
+import json
+import os
 import statistics
 
 import folium
@@ -12,7 +14,7 @@ from queries.price_paid_queries import (
     fetch_price_stats_for_polygon,
     fetch_price_stats_national,
 )
-from utils.polygons import DEFAULT_COLOR, load_polygons
+from utils.polygons import DEFAULT_COLOR, load_polygons, save_polygons
 
 st.set_page_config(page_title="Price Paid Analysis", layout="wide")
 
@@ -114,33 +116,96 @@ st_folium(m, width="stretch", height=400, returned_objects=[])
 st.divider()
 
 
+NATIONAL_CACHE_FILE = "national_price_stats.json"
+
+
+def _load_national_cache():
+    if os.path.exists(NATIONAL_CACHE_FILE):
+        with open(NATIONAL_CACHE_FILE) as f:
+            return json.load(f)
+    return None
+
+
+def _save_national_cache(stats):
+    with open(NATIONAL_CACHE_FILE, "w") as f:
+        json.dump(stats, f)
+
+
 # ---------------------------------------------------------------------------
-# Session state for cached results
+# Session state — seed from stored data on first load
 # ---------------------------------------------------------------------------
 
 if "pp_results" not in st.session_state:
     st.session_state.pp_results = {}
 if "pp_national" not in st.session_state:
-    st.session_state.pp_national = None
+    st.session_state.pp_national = _load_national_cache()
+
+for feat in polygons:
+    poly_id = feat["properties"].get("id", feat["properties"].get("name"))
+    if poly_id not in st.session_state.pp_results:
+        stored_stats = feat["properties"].get("pp_stats")
+        stored_prices = feat["properties"].get("pp_prices")
+        if stored_stats is not None:
+            # pp_prices is stored as [[year, price], ...] — convert back to tuples
+            prices_tuples = [tuple(p) for p in (stored_prices or [])]
+            st.session_state.pp_results[poly_id] = {
+                "stats": stored_stats,
+                "prices": prices_tuples,
+            }
 
 
 # ---------------------------------------------------------------------------
-# Fetch button
+# Fetch controls
 # ---------------------------------------------------------------------------
 
-if st.button("Fetch price data", type="primary"):
+def _fetch_polygon(feat):
+    poly_id = feat["properties"].get("id", feat["properties"].get("name"))
+    name = feat["properties"].get("name", poly_id)
+    coords = feat["geometry"]["coordinates"]
+    with st.spinner(f"Fetching prices for {name}…"):
+        poly_stats, all_prices = fetch_price_stats_for_polygon(coords)
+    st.session_state.pp_results[poly_id] = {"stats": poly_stats, "prices": all_prices}
+    # Persist to polygons.geojson — prices stored as lists (JSON-serialisable)
+    for i, f in enumerate(polygons):
+        if f["properties"].get("id", f["properties"].get("name")) == poly_id:
+            polygons[i]["properties"]["pp_stats"] = poly_stats
+            polygons[i]["properties"]["pp_prices"] = [list(p) for p in all_prices]
+            break
+    save_polygons(polygons)
+
+
+def _ensure_national():
     if st.session_state.pp_national is None:
         with st.spinner("Fetching national price data…"):
             st.session_state.pp_national = fetch_price_stats_national()
+            _save_national_cache(st.session_state.pp_national)
 
-    for feat in selected:
+
+with st.container():
+    btn_cols = st.columns(2 + len(selected))
+    if btn_cols[0].button("Fetch all", type="primary", use_container_width=True):
+        _ensure_national()
+        for feat in selected:
+            _fetch_polygon(feat)
+        st.rerun()
+
+    if btn_cols[1].button("Fetch missing", use_container_width=True):
+        _ensure_national()
+        already = st.session_state.pp_results
+        for feat in selected:
+            poly_id = feat["properties"].get("id", feat["properties"].get("name"))
+            if poly_id not in already:
+                _fetch_polygon(feat)
+        st.rerun()
+
+    for idx, feat in enumerate(selected):
         poly_id = feat["properties"].get("id", feat["properties"].get("name"))
-        coords = feat["geometry"]["coordinates"]
-        with st.spinner(f"Fetching prices for {feat['properties'].get('name')}…"):
-            poly_stats, all_prices = fetch_price_stats_for_polygon(coords)
-        st.session_state.pp_results[poly_id] = {"stats": poly_stats, "prices": all_prices}
-
-    st.rerun()
+        name = feat["properties"].get("name", poly_id)
+        if btn_cols[2 + idx].button(f"↺ {name}", key=f"refresh_{poly_id}",
+                                    use_container_width=True):
+            _ensure_national()
+            _fetch_polygon(feat)
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +218,7 @@ loaded = [
 ]
 
 if not loaded:
-    st.caption("Click 'Fetch price data' to load results.")
+    st.caption("Click 'Fetch missing' to load results.")
     st.stop()
 
 

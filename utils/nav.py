@@ -13,7 +13,7 @@ def render():
     c1, c2, c3, _ = st.columns([1, 1, 1, 7])
     c1.page_link("pages/0_Manage_Polygons.py", label="Polygons", icon="🗺️")
     c2.page_link("pages/1_House_Counter.py",   label="House Counter", icon="🏠")
-    c3.page_link("pages/2_Price_Paid.py",      label="Price Paid", icon="💷")
+    c3.page_link("pages/2_PricePaid.py",       label="Price Paid", icon="💷")
     st.divider()
 
 
