@@ -275,6 +275,16 @@ def _bar_vs_baseline(fig, years, vals, name, color, baseline=100,
 
 
 national = st.session_state.pp_national or []
+
+# Exclude the latest year across all charts — it is almost always incomplete.
+# Derived from national data (largest dataset); polygon stats use the same cutoff.
+_latest_year = max((r["year"] for r in national), default=None)
+
+def _complete(rows):
+    """Filter a list of year-keyed dicts to exclude the latest (incomplete) year."""
+    return [r for r in rows if r["year"] != _latest_year]
+
+national = _complete(national)
 _nat_by_yr = _by_year(national)
 
 
@@ -301,7 +311,7 @@ col_headers[5].markdown("**Max ever**")
 for feat in loaded:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
     name = feat["properties"].get("name", poly_id)
-    stats = st.session_state.pp_results[poly_id]["stats"]
+    stats = _complete(st.session_state.pp_results[poly_id]["stats"])
     if not stats:
         continue
 
@@ -399,7 +409,7 @@ fig_hist.update_layout(
     xaxis_title="Sale price (£)",
     yaxis_title="Probability density",
     xaxis=dict(tickprefix="£", tickformat=","),
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
     margin=dict(t=20, b=40),
     hovermode="x unified",
 )
@@ -418,7 +428,7 @@ narrative_parts = []
 for feat in loaded:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
     name = feat["properties"].get("name", poly_id)
-    stats = st.session_state.pp_results[poly_id]["stats"]
+    stats = _complete(st.session_state.pp_results[poly_id]["stats"])
     if not stats:
         continue
     latest = stats[-1]
@@ -443,7 +453,7 @@ for feat in loaded:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
     name = feat["properties"].get("name", poly_id)
     color = feat["properties"].get("color", DEFAULT_COLOR)
-    stats = st.session_state.pp_results[poly_id]["stats"]
+    stats = _complete(st.session_state.pp_results[poly_id]["stats"])
 
     years = [r["year"] for r in stats]
 
@@ -496,7 +506,7 @@ if national:
 fig_trend.update_layout(
     yaxis_title="Median sale price (£)",
     xaxis_title="Year",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
     margin=dict(t=20, b=40),
     hovermode="x unified",
 )
@@ -521,7 +531,7 @@ if national:
         poly_id = feat["properties"].get("id", feat["properties"].get("name"))
         name = feat["properties"].get("name", poly_id)
         color = feat["properties"].get("color", DEFAULT_COLOR)
-        stats = st.session_state.pp_results[poly_id]["stats"]
+        stats = _complete(st.session_state.pp_results[poly_id]["stats"])
 
         years, vals = [], []
         for r in stats:
@@ -540,7 +550,7 @@ if national:
         yaxis_title="Median price as % of national median",
         xaxis_title="Year",
         barmode="group",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
         margin=dict(t=20, b=40),
         hovermode="x unified",
     )
@@ -568,7 +578,7 @@ if base_year:
     for feat in loaded:
         poly_id = feat["properties"].get("id", feat["properties"].get("name"))
         name = feat["properties"].get("name", poly_id)
-        stats = st.session_state.pp_results[poly_id]["stats"]
+        stats = _complete(st.session_state.pp_results[poly_id]["stats"])
         by_yr = _by_year(stats)
         base_val = _float(by_yr.get(base_year, {}).get("median_price"))
         latest_val = _float(stats[-1]["median_price"]) if stats else None
@@ -599,7 +609,7 @@ if base_year:
         poly_id = feat["properties"].get("id", feat["properties"].get("name"))
         name = feat["properties"].get("name", poly_id)
         color = feat["properties"].get("color", DEFAULT_COLOR)
-        stats = st.session_state.pp_results[poly_id]["stats"]
+        stats = _complete(st.session_state.pp_results[poly_id]["stats"])
         by_yr = _by_year(stats)
 
         base_val = _float(by_yr.get(base_year, {}).get("median_price"))
@@ -635,7 +645,7 @@ if base_year:
     fig_index.update_layout(
         yaxis_title=f"Index ({base_year} = 100)",
         xaxis_title="Year",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
         margin=dict(t=20, b=40),
         hovermode="x unified",
     )
@@ -667,7 +677,7 @@ if base_year:
                 poly_id = feat["properties"].get("id", feat["properties"].get("name"))
                 name = feat["properties"].get("name", poly_id)
                 color = feat["properties"].get("color", DEFAULT_COLOR)
-                stats = st.session_state.pp_results[poly_id]["stats"]
+                stats = _complete(st.session_state.pp_results[poly_id]["stats"])
                 by_yr = _by_year(stats)
 
                 base_val = _float(by_yr.get(base_year, {}).get("median_price"))
@@ -691,7 +701,7 @@ if base_year:
                 yaxis_title=f"Growth relative to national ({base_year} = 100)",
                 xaxis_title="Year",
                 barmode="group",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
                 margin=dict(t=20, b=40),
                 hovermode="x unified",
             )
@@ -727,6 +737,7 @@ for feat in loaded:
         st.caption(f"No mix data for {name} — re-fetch to load.")
         continue
 
+    mix = _complete(mix)
     st.markdown(f"**{name}**")
 
     # Build {year: {category: count}} for each dimension
@@ -755,7 +766,7 @@ for feat in loaded:
             title=title,
             yaxis=dict(ticksuffix="%", range=[0, 100]),
             xaxis_title="Year",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
             margin=dict(t=40, b=40),
             hovermode="x unified",
             height=300,
@@ -785,7 +796,7 @@ for feat in loaded:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
     name = feat["properties"].get("name", poly_id)
     uprn_count = feat["properties"].get("uprn_count")
-    stats = st.session_state.pp_results[poly_id]["stats"]
+    stats = _complete(st.session_state.pp_results[poly_id]["stats"])
     if not stats or not uprn_count:
         continue
     recent = [r for r in stats if int(r["year"]) >= 2015]
@@ -811,9 +822,6 @@ st.markdown(
     + " ".join(turnover_parts)
 )
 
-# Exclude the latest year as it is likely incomplete
-_latest_year = max(r["year"] for r in national) if national else None
-
 fig_turnover = go.Figure()
 
 for feat in loaded:
@@ -821,14 +829,13 @@ for feat in loaded:
     name = feat["properties"].get("name", poly_id)
     color = feat["properties"].get("color", DEFAULT_COLOR)
     uprn_count = feat["properties"].get("uprn_count")
-    stats = st.session_state.pp_results[poly_id]["stats"]
+    stats = _complete(st.session_state.pp_results[poly_id]["stats"])
 
     if not uprn_count:
         continue
 
-    full_years = [r for r in stats if r["year"] != _latest_year]
-    years = [r["year"] for r in full_years]
-    pct   = [int(r["count"]) / uprn_count * 100 for r in full_years]
+    years = [r["year"] for r in stats]
+    pct   = [int(r["count"]) / uprn_count * 100 for r in stats]
     fig_turnover.add_trace(go.Scatter(
         x=years, y=pct,
         mode="lines+markers",
@@ -838,9 +845,8 @@ for feat in loaded:
     ))
 
 if national:
-    full_national = [r for r in national if r["year"] != _latest_year]
-    ny   = [r["year"] for r in full_national]
-    npct = [int(r["count"]) / EW_DWELLING_STOCK * 100 for r in full_national]
+    ny   = [r["year"] for r in national]
+    npct = [int(r["count"]) / EW_DWELLING_STOCK * 100 for r in national]
     fig_turnover.add_trace(go.Scatter(
         x=ny, y=npct,
         mode="lines",
@@ -852,7 +858,7 @@ if national:
 fig_turnover.update_layout(
     xaxis_title="Year",
     yaxis_title="% of address stock sold",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
     margin=dict(t=20, b=40),
     hovermode="x unified",
 )
