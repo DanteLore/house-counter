@@ -16,6 +16,7 @@ from queries.price_paid_queries import (
     fetch_price_by_type_national,
     fetch_price_stats_for_county,
     fetch_price_by_type_for_county,
+    fetch_address_count_for_county,
     fetch_all_county_names,
     fetch_mix_for_polygon,
     fetch_price_by_type_for_polygon,
@@ -131,20 +132,20 @@ def save_national_cache(stats, cpi, price_by_type=None):
 
 
 def load_county_cache():
-    """Return {"names": [...], "stats": {county: [rows]}, "by_type": {county: [rows]}, "comparison": str}."""
+    """Return {"names", "stats", "by_type", "address_counts", "comparison"} from disk."""
     if os.path.exists(COUNTY_CACHE_FILE):
         with open(COUNTY_CACHE_FILE) as f:
             data = json.load(f)
         if isinstance(data, dict) and "names" in data:
             return data
-        return {"names": None, "stats": data, "by_type": {}, "comparison": None}
-    return {"names": None, "stats": {}, "by_type": {}, "comparison": None}
+        return {"names": None, "stats": data, "by_type": {}, "address_counts": {}, "comparison": None}
+    return {"names": None, "stats": {}, "by_type": {}, "address_counts": {}, "comparison": None}
 
 
-def save_county_cache(names, stats, comparison=None, by_type=None):
+def save_county_cache(names, stats, comparison=None, by_type=None, address_counts=None):
     with open(COUNTY_CACHE_FILE, "w") as f:
-        json.dump({"names": names, "stats": stats,
-                   "by_type": by_type or {}, "comparison": comparison}, f)
+        json.dump({"names": names, "stats": stats, "by_type": by_type or {},
+                   "address_counts": address_counts or {}, "comparison": comparison}, f)
 
 
 # ---------------------------------------------------------------------------
@@ -160,9 +161,10 @@ if "pp_national" not in st.session_state or "pp_cpi" not in st.session_state:
     st.session_state.pp_national_by_type  = cached.get("price_by_type")
 if "pp_county_cache" not in st.session_state:
     _county_disk = load_county_cache()
-    st.session_state.pp_county_cache         = _county_disk["stats"]
-    st.session_state.pp_county_by_type_cache = _county_disk.get("by_type", {})
-    st.session_state.pp_county_names         = _county_disk["names"]
+    st.session_state.pp_county_cache          = _county_disk["stats"]
+    st.session_state.pp_county_by_type_cache  = _county_disk.get("by_type", {})
+    st.session_state.pp_county_address_counts = _county_disk.get("address_counts", {})
+    st.session_state.pp_county_names          = _county_disk["names"]
     st.session_state.pp_comparison_selection = (
         _county_disk.get("comparison") or "National (England & Wales)"
     )
@@ -245,10 +247,16 @@ def fetch_county_stats(county_name):
         stats = fetch_price_stats_for_county(county_name)
     with st.spinner(f"Fetching price by type for {county_name}…"):
         by_type = fetch_price_by_type_for_county(county_name)
-    st.session_state.pp_county_cache[county_name]         = stats
-    st.session_state.pp_county_by_type_cache[county_name] = by_type
-    save_county_cache(st.session_state.pp_county_names, st.session_state.pp_county_cache,
-                      _current_comparison(), st.session_state.pp_county_by_type_cache)
+    with st.spinner(f"Counting addresses in {county_name}…"):
+        address_count = fetch_address_count_for_county(county_name)
+    st.session_state.pp_county_cache[county_name]          = stats
+    st.session_state.pp_county_by_type_cache[county_name]  = by_type
+    st.session_state.pp_county_address_counts[county_name] = address_count
+    save_county_cache(
+        st.session_state.pp_county_names, st.session_state.pp_county_cache,
+        _current_comparison(), st.session_state.pp_county_by_type_cache,
+        st.session_state.pp_county_address_counts,
+    )
 
 
 with st.container():
@@ -387,14 +395,18 @@ national = exclude_incomplete_year(national)
 
 # comparison / comparison_label: what we compare each polygon against.
 # Either national E&W stats, or a cached county's stats.
+EW_DWELLING_STOCK = 25_400_000  # ONS dwelling stock estimate, England & Wales 2023
+
 if selected_county and selected_county in st.session_state.pp_county_cache:
-    comparison          = exclude_incomplete_year(st.session_state.pp_county_cache[selected_county])
-    comparison_label    = selected_county
-    _cmp_by_type_raw    = st.session_state.pp_county_by_type_cache.get(selected_county, [])
+    comparison              = exclude_incomplete_year(st.session_state.pp_county_cache[selected_county])
+    comparison_label        = selected_county
+    _cmp_by_type_raw        = st.session_state.pp_county_by_type_cache.get(selected_county, [])
+    comparison_address_count = st.session_state.pp_county_address_counts.get(selected_county)
 else:
-    comparison          = national
-    comparison_label    = "National"
-    _cmp_by_type_raw    = st.session_state.get("pp_national_by_type") or []
+    comparison              = national
+    comparison_label        = "National"
+    _cmp_by_type_raw        = st.session_state.get("pp_national_by_type") or []
+    comparison_address_count = EW_DWELLING_STOCK
 
 comparison_by_year = {r["year"]: r for r in comparison}
 
@@ -1071,7 +1083,6 @@ def price_by_type_chart(feat, from_year, to_year, adjust):
 
 
 def turnover_chart():
-    EW_DWELLING_STOCK = 25_000_000
     fig = go.Figure()
     for feat in loaded:
         uprn_count = poly_uprn_count(feat)
@@ -1097,6 +1108,57 @@ def turnover_chart():
         ))
     fig.update_layout(**chart_layout(xaxis_title="Year", yaxis_title="% of address stock sold"))
     fig.update_yaxes(tickformat=".1f", ticksuffix="%")
+    return fig
+
+
+def volume_by_type_chart(feat, from_year, to_year):
+    """Annual sales per property type as % of total address stock, with comparison baseline."""
+    rows      = filter_to_year_range(poly_price_by_type(feat), from_year, to_year)
+    uprn      = poly_uprn_count(feat)
+    if not rows or not uprn:
+        return None
+    fig   = go.Figure()
+    types = sorted({r["property_type"] for r in rows})
+    for pt in types:
+        label     = PROPERTY_TYPE_LABELS.get(pt, pt)
+        type_rows = sorted([r for r in rows if r["property_type"] == pt], key=lambda r: r["year"])
+        pt_color  = PROPERTY_TYPE_COLORS.get(pt, "#888888")
+        pcts      = [r["count"] / uprn * 100 for r in type_rows]
+        fig.add_trace(go.Scatter(
+            x=[r["year"] for r in type_rows],
+            y=pcts,
+            mode="lines+markers",
+            name=label,
+            legendgroup=label,
+            line=dict(color=pt_color, width=2),
+            marker=dict(color=pt_color),
+            hovertemplate="%{x}: %{y:.2f}%<extra>" + label + "</extra>",
+        ))
+
+        # Comparison baseline — dashed, same colour, normalised by comparison stock
+        if comparison_address_count:
+            cmp_rows = sorted(
+                [(year, r) for (year, t), r in comparison_by_type.items()
+                 if t == pt
+                 and (from_year is None or year >= from_year)
+                 and (to_year   is None or year <= to_year)],
+                key=lambda x: x[0],
+            )
+            if cmp_rows:
+                cmp_pcts = [int(r["count"]) / comparison_address_count * 100 for _, r in cmp_rows]
+                fig.add_trace(go.Scatter(
+                    x=[y for y, _ in cmp_rows],
+                    y=cmp_pcts,
+                    mode="lines",
+                    name=f"{comparison_label} — {label}",
+                    legendgroup=label,
+                    showlegend=False,
+                    line=dict(color=pt_color, width=1, dash="dash"),
+                    hovertemplate="%{x}: %{y:.2f}%<extra>" + f"{comparison_label} — {label}" + "</extra>",
+                ))
+
+    fig.update_layout(**chart_layout(xaxis_title="Year", yaxis_title="% of address stock sold"))
+    fig.update_yaxes(tickformat=".2f", ticksuffix="%")
     return fig
 
 
@@ -1679,8 +1741,6 @@ st.divider()
 # Section 7: Annual turnover
 # ---------------------------------------------------------------------------
 
-EW_DWELLING_STOCK = 25_000_000
-
 st.subheader("Annual turnover")
 
 turnover_notes = []
@@ -1733,5 +1793,74 @@ if national:
                                "Addresses": f"{EW_DWELLING_STOCK:,}",
                                "Turnover %": f"{pct:.2f}%"})
 show_data_table(sorted(turnover_rows, key=lambda r: (r["Year"], r["Area"])), "Annual turnover data")
+
+st.divider()
+
+
+# ---------------------------------------------------------------------------
+# Section 8: Sales volume by property type
+# ---------------------------------------------------------------------------
+
+st.subheader("Sales volume by property type")
+vol_from, vol_to = year_range_selector("vol")
+st.markdown(
+    "Annual sales per property type expressed as a percentage of total address stock — "
+    "normalised so polygons and the comparison baseline are directly comparable regardless of size. "
+    "A falling detached % in one area alongside a rising % nearby suggests demand spillover. "
+    f"Dashed lines show the {comparison_label} baseline. "
+    "Requires address count from the House Counter tab."
+)
+
+any_vol_data = False
+for feat in loaded:
+    name  = poly_name(feat)
+    uprn  = poly_uprn_count(feat)
+    rows  = filter_to_year_range(poly_price_by_type(feat), vol_from, vol_to)
+    if not rows:
+        st.caption(f"No volume data for **{name}** — re-fetch to load.")
+        continue
+    if not uprn:
+        st.caption(f"No address count for **{name}** — run House Counter first.")
+        continue
+    any_vol_data = True
+    st.markdown(f"**{name}**")
+
+    fig = volume_by_type_chart(feat, vol_from, vol_to)
+    if fig:
+        st.plotly_chart(fig, width="stretch")
+
+    # Data table: % of stock for polygon + comparison baseline
+    vol_rows = []
+    for r in sorted(rows, key=lambda r: (r["year"], r["property_type"])):
+        vol_rows.append({
+            "Area":     name,
+            "Year":     r["year"],
+            "Type":     PROPERTY_TYPE_LABELS.get(r["property_type"], r["property_type"]),
+            "Sales":    r["count"],
+            "% stock":  f"{r['count'] / uprn * 100:.2f}%",
+        })
+    if comparison_address_count:
+        for (year, pt), r in sorted(comparison_by_type.items()):
+            if pt not in PROPERTY_TYPE_LABELS:
+                continue
+            if vol_from and year < vol_from:
+                continue
+            if vol_to and year > vol_to:
+                continue
+            cnt = int(r["count"])
+            vol_rows.append({
+                "Area":    comparison_label,
+                "Year":    year,
+                "Type":    PROPERTY_TYPE_LABELS[pt],
+                "Sales":   cnt,
+                "% stock": f"{cnt / comparison_address_count * 100:.2f}%",
+            })
+    show_data_table(
+        sorted(vol_rows, key=lambda r: (r["Year"], r["Type"], r["Area"])),
+        f"{name} — sales volume by type",
+    )
+
+if not any_vol_data:
+    st.caption("Re-fetch polygon data to load sales volume by type.")
 
 nav.render_attributions()
