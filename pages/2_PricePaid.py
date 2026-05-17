@@ -14,6 +14,9 @@ from queries.price_paid_queries import (
     fetch_price_stats_for_polygon,
     fetch_price_stats_national,
     fetch_mix_for_polygon,
+    fetch_cpi_by_year,
+    deflate_prices,
+    real_stats_from_prices,
 )
 from utils.polygons import DEFAULT_COLOR, load_polygons, save_polygons
 
@@ -123,13 +126,17 @@ NATIONAL_CACHE_FILE = "national_price_stats.json"
 def _load_national_cache():
     if os.path.exists(NATIONAL_CACHE_FILE):
         with open(NATIONAL_CACHE_FILE) as f:
-            return json.load(f)
+            data = json.load(f)
+        # Old format was a bare list; new format is {"stats": [...], "cpi": {...}}
+        if isinstance(data, list):
+            return {"stats": data, "cpi": None}
+        return data
     return None
 
 
-def _save_national_cache(stats):
+def _save_national_cache(stats, cpi):
     with open(NATIONAL_CACHE_FILE, "w") as f:
-        json.dump(stats, f)
+        json.dump({"stats": stats, "cpi": cpi}, f)
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +145,10 @@ def _save_national_cache(stats):
 
 if "pp_results" not in st.session_state:
     st.session_state.pp_results = {}
-if "pp_national" not in st.session_state:
-    st.session_state.pp_national = _load_national_cache()
+if "pp_national" not in st.session_state or "pp_cpi" not in st.session_state:
+    _cached = _load_national_cache() or {}
+    st.session_state.pp_national = _cached.get("stats")
+    st.session_state.pp_cpi = _cached.get("cpi")
 
 for feat in polygons:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
@@ -181,7 +190,9 @@ def _ensure_national():
     if st.session_state.pp_national is None:
         with st.spinner("Fetching national price data…"):
             st.session_state.pp_national = fetch_price_stats_national()
-            _save_national_cache(st.session_state.pp_national)
+        with st.spinner("Fetching CPI inflation data…"):
+            st.session_state.pp_cpi = fetch_cpi_by_year()
+        _save_national_cache(st.session_state.pp_national, st.session_state.pp_cpi)
 
 
 with st.container():
@@ -287,12 +298,63 @@ def _complete(rows):
 national = _complete(national)
 _nat_by_yr = _by_year(national)
 
+_cpi = st.session_state.pp_cpi or {}
+_cpi_available = bool(_cpi)
+_cpi_base_year = max(_cpi.keys()) if _cpi else None
+
+
+def _cpi_warning():
+    if not _cpi_available:
+        st.warning("CPI data not loaded — click **Fetch all** or **Fetch missing** to enable inflation adjustment.")
+
+
+def _deflate_prices(year_prices, adjust):
+    return deflate_prices(year_prices, _cpi, _cpi_base_year) if adjust else year_prices
+
+
+def _real_stats(poly_id, adjust):
+    """Return yearly stats for a polygon, deflating source prices first when adjust=True."""
+    year_prices = st.session_state.pp_results[poly_id].get("prices", [])
+    if adjust:
+        return real_stats_from_prices(year_prices, _cpi, _cpi_base_year)
+    return st.session_state.pp_results[poly_id]["stats"]
+
+
+def _real_national_stats(adjust):
+    """Return national yearly stats deflated to current £.
+
+    National stats come from Athena aggregates (no raw prices stored), so we
+    deflate the pre-computed stats directly — valid because CPI deflation is a
+    linear per-year transform, making deflate(median) == median(deflate(prices)).
+    """
+    rows = st.session_state.pp_national or []
+    if not adjust:
+        return rows
+    return [
+        {**r,
+         "min_price":    deflate_prices([(r["year"], r["min_price"])],    _cpi, _cpi_base_year)[0][1],
+         "max_price":    deflate_prices([(r["year"], r["max_price"])],    _cpi, _cpi_base_year)[0][1],
+         "mean_price":   deflate_prices([(r["year"], r["mean_price"])],   _cpi, _cpi_base_year)[0][1],
+         "median_price": deflate_prices([(r["year"], r["median_price"])], _cpi, _cpi_base_year)[0][1],
+         "p25_price":    deflate_prices([(r["year"], r["p25_price"])],    _cpi, _cpi_base_year)[0][1],
+         "p75_price":    deflate_prices([(r["year"], r["p75_price"])],    _cpi, _cpi_base_year)[0][1],
+         }
+        for r in rows
+    ]
+
+
+def _price_label(adjust):
+    return f"Sale price ({_cpi_base_year} £)" if adjust else "Sale price (£)"
+
 
 # ---------------------------------------------------------------------------
 # Section 1: Price distribution summary table
 # ---------------------------------------------------------------------------
 
 st.subheader("Price distribution")
+_adj_table = st.toggle("Adjust for inflation (current £)", key="adj_table", value=False)
+if _adj_table:
+    _cpi_warning()
 st.markdown(
     "Overall price spread across all years of sales data. "
     "The median is the middle sale price — half of all sales were above and half below. "
@@ -311,23 +373,23 @@ col_headers[5].markdown("**Max ever**")
 for feat in loaded:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
     name = feat["properties"].get("name", poly_id)
-    stats = _complete(st.session_state.pp_results[poly_id]["stats"])
-    if not stats:
+    year_prices = st.session_state.pp_results[poly_id].get("prices", [])
+    # Complete-year filter: exclude the latest (incomplete) year
+    year_prices = [(y, p) for y, p in year_prices if y != _latest_year]
+    if not year_prices:
         continue
-
-    mins    = [_float(r["min_price"])    for r in stats if _float(r["min_price"])    is not None]
-    maxs    = [_float(r["max_price"])    for r in stats if _float(r["max_price"])    is not None]
-    medians = [_float(r["median_price"]) for r in stats if _float(r["median_price"]) is not None]
-    p25s    = [_float(r["p25_price"])    for r in stats if _float(r["p25_price"])    is not None]
-    p75s    = [_float(r["p75_price"])    for r in stats if _float(r["p75_price"])    is not None]
+    prices = sorted(p for _, p in _deflate_prices(year_prices, _adj_table))
+    n = len(prices)
+    p25 = prices[max(0, int(n * 0.25) - 1)]
+    p75 = prices[min(n - 1, int(n * 0.75))]
 
     cols = st.columns([3, 2, 2, 2, 2, 2])
     cols[0].markdown(name)
-    cols[1].markdown(f"£{min(mins):,.0f}"                  if mins    else "—")
-    cols[2].markdown(f"£{statistics.median(p25s):,.0f}"    if p25s    else "—")
-    cols[3].markdown(f"£{statistics.median(medians):,.0f}" if medians else "—")
-    cols[4].markdown(f"£{statistics.median(p75s):,.0f}"    if p75s    else "—")
-    cols[5].markdown(f"£{max(maxs):,.0f}"                  if maxs    else "—")
+    cols[1].markdown(f"£{min(prices):,.0f}")
+    cols[2].markdown(f"£{p25:,.0f}")
+    cols[3].markdown(f"£{statistics.median(prices):,.0f}")
+    cols[4].markdown(f"£{p75:,.0f}")
+    cols[5].markdown(f"£{max(prices):,.0f}")
 
 st.divider()
 
@@ -337,6 +399,9 @@ st.divider()
 # ---------------------------------------------------------------------------
 
 st.subheader("Price distribution histogram")
+_adj_hist = st.toggle("Adjust for inflation (current £)", key="adj_hist", value=False)
+if _adj_hist:
+    _cpi_warning()
 st.markdown(
     "Distribution of sale prices for each polygon, normalised so shapes are comparable "
     "regardless of total transaction count. Bottom and top 1% are excluded as outliers. "
@@ -385,9 +450,10 @@ for feat in loaded:
         continue
 
     if hist_start and hist_end:
-        prices = [p for y, p in year_prices if hist_start <= y <= hist_end]
+        filtered = [(y, p) for y, p in year_prices if hist_start <= y <= hist_end]
     else:
-        prices = [p for _, p in year_prices]
+        filtered = list(year_prices)
+    prices = [p for _, p in _deflate_prices(filtered, _adj_hist)]
 
     prices = [p for p in prices if price_min <= p <= price_max]
 
@@ -406,7 +472,7 @@ for feat in loaded:
     ))
 
 fig_hist.update_layout(
-    xaxis_title="Sale price (£)",
+    xaxis_title=_price_label(_adj_hist),
     yaxis_title="Probability density",
     xaxis=dict(tickprefix="£", tickformat=","),
     legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
@@ -423,17 +489,24 @@ st.divider()
 # ---------------------------------------------------------------------------
 
 st.subheader("Median price trends")
+_adj_trend = st.toggle("Adjust for inflation (current £)", key="adj_trend", value=False)
+if _adj_trend:
+    _cpi_warning()
+
+_nat_trend = _complete(_real_national_stats(_adj_trend))
+_nat_trend_by_yr = _by_year(_nat_trend)
 
 narrative_parts = []
 for feat in loaded:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
     name = feat["properties"].get("name", poly_id)
-    stats = _complete(st.session_state.pp_results[poly_id]["stats"])
+    stats = _complete(_real_stats(poly_id, _adj_trend))
     if not stats:
         continue
     latest = stats[-1]
     latest_median = _float(latest["median_price"])
-    nat_latest = _float(_nat_by_yr.get(latest["year"], {}).get("median_price"))
+    nat_latest_raw = _nat_trend_by_yr.get(latest["year"])
+    nat_latest = _float(nat_latest_raw["median_price"]) if nat_latest_raw else None
     if latest_median and nat_latest:
         pct_vs_national = (latest_median / nat_latest - 1) * 100
         direction = "above" if pct_vs_national >= 0 else "below"
@@ -442,9 +515,11 @@ for feat in loaded:
             f"{abs(pct_vs_national):.0f}% {direction} the national median of £{nat_latest:,.0f}."
         )
 
+_inflation_note = f" Prices adjusted to {_cpi_base_year} £ using annual average CPI." if _adj_trend else ""
 st.markdown(
-    "Median sale price per year for each selected area alongside the national median (dotted line). "
-    + (" ".join(narrative_parts))
+    "Median sale price per year for each selected area alongside the national median (dotted line)."
+    + _inflation_note + " "
+    + " ".join(narrative_parts)
 )
 
 fig_trend = go.Figure()
@@ -453,7 +528,7 @@ for feat in loaded:
     poly_id = feat["properties"].get("id", feat["properties"].get("name"))
     name = feat["properties"].get("name", poly_id)
     color = feat["properties"].get("color", DEFAULT_COLOR)
-    stats = _complete(st.session_state.pp_results[poly_id]["stats"])
+    stats = _complete(_real_stats(poly_id, _adj_trend))
 
     years = [r["year"] for r in stats]
 
@@ -493,10 +568,10 @@ for feat in loaded:
         hovertemplate="%{x}: £%{y:,.0f} (median)<extra>" + name + "</extra>",
     ))
 
-if national:
+if _nat_trend:
     fig_trend.add_trace(go.Scatter(
-        x=[r["year"] for r in national],
-        y=[_float(r["median_price"]) for r in national],
+        x=[r["year"] for r in _nat_trend],
+        y=[_float(r["median_price"]) for r in _nat_trend],
         mode="lines",
         name="National",
         line=dict(color="#888888", width=1, dash="dot"),
@@ -504,7 +579,7 @@ if national:
     ))
 
 fig_trend.update_layout(
-    yaxis_title="Median sale price (£)",
+    yaxis_title=_price_label(_adj_trend),
     xaxis_title="Year",
     legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
     margin=dict(t=20, b=40),

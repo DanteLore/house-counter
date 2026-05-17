@@ -154,6 +154,69 @@ WHERE p.record_status != 'D'
     ]
 
 
+_CPI_BASE = 100.0  # CPI index is normalised to 2015 = 100
+
+
+def deflate_price(price, year, cpi_by_year, base_year=None):
+    """
+    Convert a nominal price to real £ in base_year using annual average CPI.
+
+    base_year: year string to rebase to (e.g. "2024"). Defaults to 2015 (CPI index = 100).
+    cpi_by_year: dict of {year_str: cpi_index_float} as returned by fetch_cpi_by_year().
+    Returns the nominal price unchanged if CPI data is missing for either year.
+    """
+    idx = cpi_by_year.get(str(year))
+    if not idx:
+        return price
+    if base_year is not None:
+        base_idx = cpi_by_year.get(str(base_year))
+        if not base_idx:
+            return price
+        return float(price) / idx * base_idx
+    return float(price) / idx * _CPI_BASE
+
+
+def deflate_prices(year_prices, cpi_by_year, base_year=None):
+    """
+    Deflate a list of (year, price) tuples to real £ in base_year.
+
+    year_prices: list of (year_str, nominal_price) tuples.
+    Returns a new list of (year_str, real_price) tuples.
+    """
+    return [(year, deflate_price(price, year, cpi_by_year, base_year)) for year, price in year_prices]
+
+
+def real_stats_from_prices(year_prices, cpi_by_year, base_year=None):
+    """
+    Derive yearly stats from raw (year, price) tuples after deflating each price to real £.
+
+    This is the correct order of operations: deflate individual prices first, then aggregate.
+    Deflating derived stats (e.g. the nominal median) gives the same answer for single-year
+    aggregates (deflation is a linear transform within a year) but deflating first is clearer
+    and correct by construction for any cross-year summary.
+
+    Returns a list of per-year stat dicts in the same shape as _aggregate_by_year.
+    """
+    real_prices = deflate_prices(year_prices, cpi_by_year, base_year)
+    by_year = {}
+    for year, price in real_prices:
+        by_year.setdefault(year, []).append(price)
+    return _aggregate_by_year(by_year)
+
+
+def fetch_cpi_by_year():
+    """Return annual average CPI index (2015=100) keyed by year string, from 1988 onwards."""
+    sql = """
+SELECT year, AVG(cpi_index) AS avg_cpi
+FROM incoming.ons_inflation_inflation
+WHERE cpi_index IS NOT NULL
+GROUP BY year
+ORDER BY year
+""".strip()
+    rows = run_query(sql)
+    return {str(int(r["year"])): float(r["avg_cpi"]) for r in rows if r.get("avg_cpi")}
+
+
 def fetch_price_stats_national():
     """Return yearly price stats aggregated across all of England & Wales."""
     sql = f"""
