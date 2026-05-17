@@ -103,6 +103,20 @@ def render_price_distribution_table(loaded, poly_name_fn, poly_prices_fn,
             f"half were between £{r['p25']:,.0f} and £{r['p75']:,.0f}; "
             f"the median was £{r['med']:,.0f} from {r['n']:,} transactions."
         )
+
+    table_rows = [{
+        "Area":    r["name"],
+        "Years":   f"{r['year_from']}-{r['year_to']}",
+        "Count":   r["n"],
+        "Min":     f"£{r['min']:,.0f}",
+        "P5":      f"£{r['p5']:,.0f}",
+        "P25":     f"£{r['p25']:,.0f}",
+        "Median":  f"£{r['med']:,.0f}",
+        "P75":     f"£{r['p75']:,.0f}",
+        "P95":     f"£{r['p95']:,.0f}",
+        "Max":     f"£{r['max']:,.0f}",
+    } for r in rows]
+    show_data_table(table_rows, "Price distribution summary data")
     st.divider()
 
 
@@ -133,4 +147,29 @@ def render_price_histogram(loaded, poly_name_fn, poly_color_fn, poly_prices_fn,
                               price_axis_label_fn(adjust)),
         width="stretch",
     )
+
+    hist_rows = []
+    for feat in loaded:
+        year_prices = [
+            (y, p) for y, p in poly_prices_fn(feat)
+            if y != latest_year
+            and (from_year is None or y >= from_year)
+            and (to_year   is None or y <= to_year)
+        ]
+        if not year_prices:
+            continue
+        prices = sorted(p for _, p in prices_in_real_terms_fn(year_prices, adjust))
+        n = len(prices)
+        hist_rows.append({
+            "Area":    poly_name_fn(feat),
+            "Count":   n,
+            "Min":     f"£{min(prices):,.0f}",
+            "P5":      f"£{prices[max(0, int(n * 0.05) - 1)]:,.0f}",
+            "P25":     f"£{prices[max(0, int(n * 0.25) - 1)]:,.0f}",
+            "Median":  f"£{prices[n // 2]:,.0f}",
+            "P75":     f"£{prices[min(n - 1, int(n * 0.75))]:,.0f}",
+            "P95":     f"£{prices[min(n - 1, int(n * 0.95))]:,.0f}",
+            "Max":     f"£{max(prices):,.0f}",
+        })
+    show_data_table(hist_rows, "Price distribution data")
     st.divider()

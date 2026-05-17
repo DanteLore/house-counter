@@ -7,6 +7,7 @@ from price_paid.calculations import (
     build_cross_polygon_narrative,
     rank_polygons,
 )
+from price_paid.charts.common import show_data_table
 
 
 def render_market_summary(loaded, poly_name_fn, poly_stats_fn, poly_prices_fn,
@@ -106,3 +107,21 @@ upward, so it is worth considering alongside the other metrics.
             st.markdown(f"**{name}**")
             for line in lines:
                 st.markdown(f"- {line}")
+
+    summary_table = []
+    for s in market_summaries:
+        row = {"Area": s["name"]}
+        if "cagr" in s:
+            row["CAGR (%/yr)"]   = f"{s['cagr']:+.2f}%"
+            row["CAGR period"]   = f"{s['cagr_from']}-{s['cagr_to']}"
+        if "volatility" in s:
+            row["Volatility (CV)"] = f"{s['volatility']:.2f}%"
+        if "turnover" in s:
+            row["Turnover (%/yr)"] = f"{s['turnover']:.2f}%"
+            row["Implied hold (yr)"] = f"{100 / s['turnover']:.0f}"
+        if "new_build_pct" in s:
+            row["New build share"] = f"{s['new_build_pct']:.1f}%"
+        if "vs_national" in s:
+            row[f"Premium vs {comparison_label}"] = f"{s['vs_national']:.0f}%"
+        summary_table.append(row)
+    show_data_table(summary_table, "Market summary data")
