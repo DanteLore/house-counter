@@ -1829,15 +1829,16 @@ for feat in loaded:
     if fig:
         st.plotly_chart(fig, width="stretch")
 
-    # Data table: % of stock for polygon + comparison baseline
+    # Data table: absolutes + % of stock for polygon and comparison baseline
     vol_rows = []
     for r in sorted(rows, key=lambda r: (r["year"], r["property_type"])):
         vol_rows.append({
-            "Area":     name,
-            "Year":     r["year"],
-            "Type":     PROPERTY_TYPE_LABELS.get(r["property_type"], r["property_type"]),
-            "Sales":    r["count"],
-            "% stock":  f"{r['count'] / uprn * 100:.2f}%",
+            "Area":          name,
+            "Year":          r["year"],
+            "Type":          PROPERTY_TYPE_LABELS.get(r["property_type"], r["property_type"]),
+            "Sales":         r["count"],
+            "Address stock": f"{uprn:,}",
+            "% of stock":    f"{r['count'] / uprn * 100:.2f}%",
         })
     if comparison_address_count:
         for (year, pt), r in sorted(comparison_by_type.items()):
@@ -1849,11 +1850,12 @@ for feat in loaded:
                 continue
             cnt = int(r["count"])
             vol_rows.append({
-                "Area":    comparison_label,
-                "Year":    year,
-                "Type":    PROPERTY_TYPE_LABELS[pt],
-                "Sales":   cnt,
-                "% stock": f"{cnt / comparison_address_count * 100:.2f}%",
+                "Area":          comparison_label,
+                "Year":          year,
+                "Type":          PROPERTY_TYPE_LABELS[pt],
+                "Sales":         cnt,
+                "Address stock": f"{comparison_address_count:,}",
+                "% of stock":    f"{cnt / comparison_address_count * 100:.2f}%",
             })
     show_data_table(
         sorted(vol_rows, key=lambda r: (r["Year"], r["Type"], r["Area"])),

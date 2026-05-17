@@ -320,40 +320,29 @@ LIMIT 1
     return poly, bounds
 
 
-def fetch_address_count_for_county(county_name):
-    """Return the number of Code Point Open addresses within a CTYUA boundary.
+UPRN_TABLE = "os_open_uprn_uprn"
 
-    Used as the dwelling stock denominator for turnover calculations, matching
-    the UPRN count approach used for drawn polygons.
+
+def fetch_address_count_for_county(county_name):
+    """Return the number of UPRNs within a CTYUA boundary.
+
+    Uses OS Open UPRN (grid_e/grid_n in OSGB metres), consistent with the
+    UPRN count used by the House Counter for drawn polygons.
     """
     poly, bounds = _fetch_ctyua_boundary(county_name)
     if poly is None:
         return None
 
-    sql_areas = f"""
-SELECT DISTINCT postcode_area
-FROM {ATHENA_DB}.{CODEPOINT_TABLE}
-WHERE eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
-  AND northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
-""".strip()
-    area_rows = run_query(sql_areas)
-    postcode_areas = {r["postcode_area"] for r in area_rows if r.get("postcode_area")}
-    if not postcode_areas:
-        return None
-
-    area_list = ", ".join(f"'{a}'" for a in postcode_areas)
-
     sql = f"""
-SELECT eastings, northings
-FROM {ATHENA_DB}.{CODEPOINT_TABLE}
-WHERE postcode_area IN ({area_list})
-  AND eastings  BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
-  AND northings BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
+SELECT x_coordinate, y_coordinate
+FROM {ATHENA_DB}.{UPRN_TABLE}
+WHERE x_coordinate BETWEEN {bounds[0]:.0f} AND {bounds[2]:.0f}
+  AND y_coordinate BETWEEN {bounds[1]:.0f} AND {bounds[3]:.0f}
 """.strip()
     records = run_query(sql)
     return sum(
         1 for r in records
-        if poly.contains(Point(float(r["eastings"]), float(r["northings"])))
+        if poly.contains(Point(float(r["x_coordinate"]), float(r["y_coordinate"])))
     )
 
 
