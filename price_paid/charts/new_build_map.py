@@ -49,7 +49,9 @@ def render_new_build_map(loaded, poly_name_fn, poly_color_fn, poly_new_build_loc
         st.caption("No new build location data for completed years.")
         return
 
-    c1, c2, c3 = st.columns(3)
+    poly_names = sorted({r["_name"] for r in all_rows})
+
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
         from_year = st.selectbox("From year", years, index=0, key="nb_map_from")
     with c2:
@@ -57,6 +59,8 @@ def render_new_build_map(loaded, poly_name_fn, poly_color_fn, poly_new_build_loc
     with c3:
         type_options = ["All types"] + list(PROPERTY_TYPE_LABELS.values())
         type_filter  = st.selectbox("Property type", type_options, key="nb_map_type")
+    with c4:
+        poly_filter = st.selectbox("Polygon", ["All polygons"] + poly_names, key="nb_map_poly")
 
     selected_type_code = None
     if type_filter != "All types":
@@ -69,6 +73,7 @@ def render_new_build_map(loaded, poly_name_fn, poly_color_fn, poly_new_build_loc
         if r["year"] != latest_year
         and from_year <= r["year"] <= to_year
         and (selected_type_code is None or r["property_type"] == selected_type_code)
+        and (poly_filter == "All polygons" or r["_name"] == poly_filter)
     ]
 
     if not filtered:
