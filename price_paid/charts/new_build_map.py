@@ -1,11 +1,25 @@
 """New build sales map: clustered markers at postcode centroids, coloured by polygon."""
 
+import hashlib
+import math
+
 import folium
 import streamlit as st
 from folium.plugins import MarkerCluster
 from streamlit_folium import st_folium
 
 from price_paid.charts.common import PROPERTY_TYPE_LABELS
+
+# ~1 metre in degrees at UK latitudes
+_JITTER_DEG = 0.000009
+
+
+def _jitter(lat, lon, index):
+    """Spread duplicate-coordinate points in a tiny circle so Leaflet counts them separately."""
+    angle = (index * 137.508) % 360  # golden-angle spiral — spreads evenly
+    rad   = math.radians(angle)
+    r     = _JITTER_DEG * (1 + (index // 20))  # grow radius if many duplicates
+    return lat + r * math.sin(rad), lon + r * math.cos(rad)
 
 
 def render_new_build_map(loaded, poly_name_fn, poly_color_fn, poly_new_build_locations_fn,
@@ -61,24 +75,43 @@ def render_new_build_map(loaded, poly_name_fn, poly_color_fn, poly_new_build_loc
         st.caption("No data matches the selected filters.")
         return
 
+    st.caption(
+        f"{len(filtered):,} new build sale{'s' if len(filtered) != 1 else ''} "
+        f"({from_year}–{to_year}). Each marker = one sale; cluster numbers are accurate counts."
+    )
+
     centre_lat = sum(r["lat"] for r in filtered) / len(filtered)
     centre_lon = sum(r["lon"] for r in filtered) / len(filtered)
 
     m = folium.Map(location=(centre_lat, centre_lon), zoom_start=13, tiles="OpenStreetMap")
-    cluster = MarkerCluster().add_to(m)
+    cluster = MarkerCluster(
+        options={"maxClusterRadius": 40}
+    ).add_to(m)
 
+    # Track how many times each (lat, lon) has been used so duplicates get jittered
+    coord_counts = {}
     for r in filtered:
+        key = (r["lat"], r["lon"])
+        idx = coord_counts.get(key, 0)
+        coord_counts[key] = idx + 1
+        jlat, jlon = _jitter(r["lat"], r["lon"], idx) if idx > 0 else (r["lat"], r["lon"])
+
         label = PROPERTY_TYPE_LABELS.get(r["property_type"], r["property_type"])
-        popup  = f"{r['postcode']}<br>{r['year']} - {label}<br>{r['count']} sale{'s' if r['count'] != 1 else ''}"
+        popup = (
+            f"<b>{r['postcode']}</b><br>"
+            f"{r['year']} &mdash; {label}<br>"
+            f"<i>{r['_name']}</i>"
+        )
         folium.CircleMarker(
-            location=(r["lat"], r["lon"]),
+            location=(jlat, jlon),
             radius=6,
             color=r["_color"],
             fill=True,
             fill_color=r["_color"],
-            fill_opacity=0.8,
-            tooltip=f"{r['_name']} - {r['postcode']} ({r['year']})",
-            popup=folium.Popup(popup, max_width=200),
+            fill_opacity=0.75,
+            weight=1.5,
+            tooltip=f"{r['_name']} - {r['postcode']} ({r['year']}) - {label}",
+            popup=folium.Popup(popup, max_width=220),
         ).add_to(cluster)
 
     st_folium(m, width="stretch", height=500, returned_objects=[])

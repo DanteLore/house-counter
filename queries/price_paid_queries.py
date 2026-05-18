@@ -200,7 +200,7 @@ WHERE p.record_status != 'D'
 
     records = run_query(sql)
 
-    by_key = {}
+    rows = []
     for r in records:
         try:
             e = float(r["eastings"])
@@ -210,13 +210,15 @@ WHERE p.record_status != 'D'
         if not poly.contains(Point(e, n)):
             continue
         lon, lat = osgb_to_wgs84(e, n)
-        key = (r["year"], r["property_type"], r["postcode"], round(lat, 6), round(lon, 6))
-        by_key[key] = by_key.get(key, 0) + 1
+        rows.append({
+            "year":          r["year"],
+            "property_type": r["property_type"],
+            "postcode":      r["postcode"],
+            "lat":           round(lat, 6),
+            "lon":           round(lon, 6),
+        })
 
-    return [
-        {"year": y, "property_type": pt, "postcode": pc, "lat": lat, "lon": lon, "count": cnt}
-        for (y, pt, pc, lat, lon), cnt in sorted(by_key.items())
-    ]
+    return sorted(rows, key=lambda r: (r["year"], r["property_type"], r["postcode"]))
 
 
 def fetch_price_by_type_for_polygon(geojson_coords):
